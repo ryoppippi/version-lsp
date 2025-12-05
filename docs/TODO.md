@@ -16,7 +16,7 @@
 
 #### 0.1 プロジェクト構造のセットアップ
 
-- [ ] [STRUCTURAL] Cargo.tomlの作成と依存関係の定義
+- [x] [STRUCTURAL] Cargo.tomlの作成と依存関係の定義
   - tower-lsp 0.20+
   - tree-sitter 0.22+
   - reqwest 0.12+ (async, rustls)
@@ -27,7 +27,7 @@
   - anyhow, thiserror
   - async-trait
 
-- [ ] [STRUCTURAL] ディレクトリ構造の作成
+- [x] [STRUCTURAL] ディレクトリ構造の作成
   - `src/lsp/` (LSPプロトコル層)
   - `src/parser/` (パーサー層)
   - `src/version/` (バージョン管理層)
@@ -35,7 +35,7 @@
   - `tests/version/` (バージョン管理テスト)
   - `tests/integration/` (統合テスト)
 
-- [ ] [STRUCTURAL] .gitignoreとCIの設定
+- [x] [STRUCTURAL] .gitignoreとCIの設定
   - Rust標準の.gitignore
   - GitHub Actions設定（clippy, rustfmt, test）
 

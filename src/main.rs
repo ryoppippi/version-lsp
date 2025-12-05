@@ -1,13 +1,8 @@
-use clap::Parser;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[arg(short, long)]
-    name: String,
-}
+mod lsp;
+mod parser;
+mod version;
 
 fn main() {
-    let args = Args::parse();
-    println!("Hello, {}!", args.name);
+    // LSP server implementation will be added in Phase 6
+    println!("version-lsp");
 }

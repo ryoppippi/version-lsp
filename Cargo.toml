@@ -5,4 +5,37 @@ authors = ["skanehira"]
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5.42", features = ["derive"] }
+# LSP
+tower-lsp = "0.20"
+async-trait = "0.1"
+
+# Parser
+tree-sitter = "0.24"
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Version management
+semver = "1.0"
+
+# Database
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+mockito = "1.4"
+tempfile = "3.10"
