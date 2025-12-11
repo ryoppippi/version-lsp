@@ -204,23 +204,24 @@
 
 ---
 
-### Phase 5: バージョンチェッカー
+### Phase 5: バージョンチェッカー ✅
 
 #### 5.1 チェック統合ロジック
 
-- [ ] [RED] バージョンチェッカーのテスト作成 (`src/version/checker.rs`内の`#[cfg(test)]`)
+- [x] [RED] バージョンチェッカーのテスト作成 (`src/version/checker.rs`内の`#[cfg(test)]`)
   - `check_version()`でキャッシュから最新バージョンを取得し、現在のバージョンと比較
   - `CheckResult`を返すことを確認
+  - テストケース: Latest, Outdated, Newer, NotInCache, NotFound, Invalid
 
-- [ ] [GREEN] バージョンチェッカーの実装 (`src/version/checker.rs`)
-  - `check_version(cache, package_info) -> Result<CheckResult>`
+- [x] [GREEN] バージョンチェッカーの実装 (`src/version/checker.rs`)
+  - `check_version(cache, registry_type, package_name, current_version) -> Result<CheckResult>`
   - キャッシュからバージョン一覧を取得
   - `version_exists()`で存在チェック
   - `get_latest_version()`で最新バージョン取得
   - `compare_versions()`でバージョン比較
 
-- [ ] [REFACTOR] 非同期処理の最適化
-  - 複数パッケージの並列チェック
+- [x] [REFACTOR] キャッシュのget_latest_versionにORDER BY追加
+  - 挿入順序を保証するためにORDER BY v.id ASCを追加
 
 ---
 
