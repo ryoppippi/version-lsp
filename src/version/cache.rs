@@ -6,6 +6,12 @@ use tracing::{debug, info};
 use crate::version::checker::VersionResolver;
 use crate::version::error::CacheError;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageId {
+    pub registry_type: String,
+    pub package_name: String,
+}
+
 pub struct Cache {
     conn: Connection,
     #[allow(dead_code)]
@@ -201,7 +207,7 @@ impl Cache {
         }
     }
 
-    pub fn get_packages_needing_refresh(&self) -> Result<Vec<(String, String)>, CacheError> {
+    pub fn get_packages_needing_refresh(&self) -> Result<Vec<PackageId>, CacheError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -214,8 +220,13 @@ impl Cache {
             .prepare("SELECT registry_type, package_name FROM packages WHERE updated_at < ?1")?;
 
         let packages = stmt
-            .query_map([threshold], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .collect::<Result<Vec<(String, String)>, _>>()?;
+            .query_map([threshold], |row| {
+                Ok(PackageId {
+                    registry_type: row.get(0)?,
+                    package_name: row.get(1)?,
+                })
+            })?
+            .collect::<Result<Vec<PackageId>, _>>()?;
 
         Ok(packages)
     }
@@ -392,8 +403,14 @@ mod tests {
 
         let stale = cache.get_packages_needing_refresh().unwrap();
         assert_eq!(stale.len(), 2);
-        assert!(stale.contains(&("npm".to_string(), "axios".to_string())));
-        assert!(stale.contains(&("npm".to_string(), "lodash".to_string())));
+        assert!(stale.contains(&PackageId {
+            registry_type: "npm".to_string(),
+            package_name: "axios".to_string()
+        }));
+        assert!(stale.contains(&PackageId {
+            registry_type: "npm".to_string(),
+            package_name: "lodash".to_string()
+        }));
     }
 
     #[test]

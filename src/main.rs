@@ -1,8 +1,4 @@
-mod lsp;
-mod parser;
-mod version;
-
-fn main() {
-    // LSP server implementation will be added in Phase 6
-    println!("version-lsp");
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    version_lsp::lsp::server::run_server().await
 }

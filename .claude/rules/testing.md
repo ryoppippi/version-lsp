@@ -4,12 +4,29 @@ paths: src/**/*.rs, tests/**/*.rs
 
 # Testing Rules
 
-## YAGNI Principle
+## Core Principles
 
-- Do NOT write code "just in case" it might be needed later
-- Only implement functionality that is currently required
-- Remove unused methods, fields, and parameters immediately
-- If a method is only used in tests, consider if it's truly necessary
+### Tests as Specification
+Tests should clearly communicate what the system does. Tests are executable documentation.
+
+### Tests as Safety Net
+Tests provide confidence that refactoring hasn't broken anything. They should fail only when they should.
+
+### Test Behavior, Not Implementation
+Test externally observable behavior, not implementation details.
+
+**Litmus test**: If a test fails, can you explain what broke for the user? If not, it's not testing behavior.
+
+```rust
+// Bad: Asserting configuration values (tautology, meaningless as specification)
+assert_eq!(config.enabled, true);
+assert_eq!(capabilities.open_close, Some(true));
+
+// Good: Testing behavior
+// Test that "when a document is opened, the server does XX"
+```
+
+**If refactoring breaks your tests, you're testing implementation details.**
 
 ## Parameterized Tests
 

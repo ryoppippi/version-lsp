@@ -197,10 +197,4 @@ mod tests {
         mock.assert_async().await;
         assert!(result.is_empty());
     }
-
-    #[test]
-    fn registry_type_returns_github_actions() {
-        let registry = GitHubRegistry::default();
-        assert_eq!(registry.registry_type(), RegistryType::GitHubActions);
-    }
 }

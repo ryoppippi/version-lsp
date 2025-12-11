@@ -4,50 +4,62 @@ paths: src/**/*.rs
 
 # Implementation Rules
 
+## YAGNI Principle
+
+- Do NOT write code "just in case" it might be needed later
+- Only implement functionality that is currently required
+- Remove unused methods, fields, and parameters immediately
+- If a method is only used in tests, consider if it's truly necessary
+
 ## Error Handling Patterns
 
-### When returning `Option` (not `Result`)
+### Logging errors with `inspect_err`
 
-Use `inspect_err` + `ok()` to log the error before converting to `Option`:
+Use `inspect_err` to log errors. This pattern applies regardless of return type:
 
 ```rust
-// Good: Use inspect_err for logging before converting to Option
+// Pattern 1: Log and convert to Option (for early return)
 let Some(value) = fallible_operation()
     .inspect_err(|e| warn!("Operation failed: {}", e))
     .ok()
 else {
-    return default_value;
+    return;
 };
 
-// Bad: Using match is verbose
-let value = match fallible_operation() {
-    Ok(v) => v,
-    Err(e) => {
-        warn!("Operation failed: {}", e);
-        return default_value;
-    }
+// Pattern 2: Log and continue (no return value)
+let Some(packages) = get_packages()
+    .inspect_err(|e| error!("Failed to get packages: {}", e))
+    .ok()
+else {
+    return;
 };
+// continue processing with packages...
 
-```
-
-### When returning `Result`
-
-- Use `inspect_err` for logging without changing the error type
-- Use `map_err` for error type conversion
-
-```rust
-// Good: inspect_err for logging, map_err for conversion
+// Pattern 3: Log and propagate with type conversion
 fn process() -> Result<Value, MyError> {
     fallible_operation()
         .inspect_err(|e| warn!("Operation failed: {}", e))
         .map_err(MyError::from)
 }
 
-// Good: Just logging, no conversion needed
+// Pattern 4: Log and propagate (same error type)
 fn process() -> Result<Value, SameError> {
     fallible_operation()
         .inspect_err(|e| warn!("Operation failed: {}", e))
 }
+```
+
+**Avoid using `match` just for error logging:**
+
+```rust
+// Bad: Using match is verbose
+let value = match fallible_operation() {
+    Ok(v) => v,
+    Err(e) => {
+        warn!("Operation failed: {}", e);
+        return;
+    }
+};
 ```
 
 ## Early Returns with `let-else`
