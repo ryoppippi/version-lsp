@@ -1,7 +1,7 @@
 //! Version comparison for packages
 
 use crate::version::error::CacheError;
-use crate::version::semver::{compare_versions, CompareResult};
+use crate::version::semver::{CompareResult, compare_versions};
 
 /// Trait for resolving version information from cache
 pub trait VersionResolver {

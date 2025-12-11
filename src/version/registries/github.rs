@@ -46,7 +46,10 @@ impl Registry for GitHubRegistry {
         RegistryType::GitHubActions
     }
 
-    async fn fetch_all_versions(&self, package_name: &str) -> Result<PackageVersions, RegistryError> {
+    async fn fetch_all_versions(
+        &self,
+        package_name: &str,
+    ) -> Result<PackageVersions, RegistryError> {
         let url = format!("{}/repos/{}/releases", self.base_url, package_name);
 
         let response = self
@@ -116,12 +119,19 @@ mod tests {
             .await;
 
         let registry = GitHubRegistry::new(&server.url());
-        let result = registry.fetch_all_versions("actions/checkout").await.unwrap();
+        let result = registry
+            .fetch_all_versions("actions/checkout")
+            .await
+            .unwrap();
 
         mock.assert_async().await;
         assert_eq!(
             result.versions,
-            vec!["v4.1.0".to_string(), "v4.0.0".to_string(), "v3.6.0".to_string()]
+            vec![
+                "v4.1.0".to_string(),
+                "v4.0.0".to_string(),
+                "v3.6.0".to_string()
+            ]
         );
     }
 
@@ -163,7 +173,9 @@ mod tests {
         mock.assert_async().await;
         assert!(matches!(
             result,
-            Err(RegistryError::RateLimited { retry_after_secs: Some(60) })
+            Err(RegistryError::RateLimited {
+                retry_after_secs: Some(60)
+            })
         ));
     }
 

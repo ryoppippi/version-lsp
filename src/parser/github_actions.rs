@@ -217,7 +217,6 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
-
     #[rstest]
     #[case(".github/workflows/ci.yml", true)]
     #[case(".github/workflows/release.yaml", true)]
