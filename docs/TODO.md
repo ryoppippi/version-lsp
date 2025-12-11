@@ -122,16 +122,16 @@
 
 #### 2.1 バージョン比較ロジック
 
-- [ ] [RED] セマンティックバージョン比較のテスト作成 (`src/version/semver.rs`内の`#[cfg(test)]`)
+- [x] [RED] セマンティックバージョン比較のテスト作成 (`src/version/semver.rs`内の`#[cfg(test)]`)
   - `compare_versions()`でlatest/outdated/newerを判定できることを確認
   - エッジケース（prereleaseバージョン、メタデータ付きなど）のテスト
 
-- [ ] [GREEN] バージョン比較の実装 (`src/version/semver.rs`)
+- [x] [GREEN] バージョン比較の実装 (`src/version/semver.rs`)
   - `semver`クレートを使用
   - `VersionStatus`列挙型の定義
   - `compare_versions(current, latest) -> VersionStatus`
 
-- [ ] [REFACTOR] エラーハンドリング
+- [x] [REFACTOR] エラーハンドリング
   - 無効なバージョン形式の場合は`VersionStatus::Invalid`を返す
 
 ---
