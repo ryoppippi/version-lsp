@@ -45,16 +45,16 @@
 
 #### 1.1 SQLiteスキーマとマイグレーション
 
-- [ ] [RED] キャッシュ初期化のテスト作成 (`tests/version/cache_test.rs`)
+- [x] [RED] キャッシュ初期化のテスト作成 (`tests/version/cache_test.rs`)
   - `Cache::new()`でDBファイルが作成されることを確認
   - テーブル（packages, versions）が存在することを確認
 
-- [ ] [GREEN] Cache構造体とスキーマ実装 (`src/version/cache.rs`)
+- [x] [GREEN] Cache構造体とスキーマ実装 (`src/version/cache.rs`)
   - `Cache::new(refresh_interval: i64) -> Result<Self>`
   - CREATE TABLE文の実行
   - INDEXの作成
 
-- [ ] [REFACTOR] エラーハンドリングとログ追加
+- [x] [REFACTOR] エラーハンドリングとログ追加
   - thiserrorでカスタムエラー型定義
   - ログ出力の追加
 
