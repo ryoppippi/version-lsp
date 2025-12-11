@@ -108,12 +108,12 @@
 
 #### 1.6 古いパッケージの取得
 
-- [x] [RED] 古いパッケージ取得のテスト作成
-  - `get_stale_packages()`で更新間隔を過ぎたパッケージを取得できることを確認
+- [x] [RED] 更新が必要なパッケージ取得のテスト作成
+  - `get_packages_needing_refresh()`で更新間隔を過ぎたパッケージを取得できることを確認
   - 現在時刻と`refresh_interval`を使った判定
 
-- [x] [GREEN] 古いパッケージ取得の実装
-  - `get_stale_packages() -> Result<Vec<(String, String)>>`
+- [x] [GREEN] 更新が必要なパッケージ取得の実装
+  - `get_packages_needing_refresh() -> Result<Vec<(String, String)>>`
   - `WHERE updated_at < (現在時刻 - refresh_interval)`
 
 ---
@@ -122,7 +122,7 @@
 
 #### 2.1 バージョン比較ロジック
 
-- [ ] [RED] セマンティックバージョン比較のテスト作成 (`tests/version/semver_test.rs`)
+- [ ] [RED] セマンティックバージョン比較のテスト作成 (`src/version/semver.rs`内の`#[cfg(test)]`)
   - `compare_versions()`でlatest/outdated/newerを判定できることを確認
   - エッジケース（prereleaseバージョン、メタデータ付きなど）のテスト
 
@@ -151,7 +151,7 @@
 
 #### 3.2 GitHub Actionsパーサーの実装
 
-- [ ] [RED] GitHub Actionsパーサーのテスト作成 (`tests/parser/github_actions_test.rs`)
+- [ ] [RED] GitHub Actionsパーサーのテスト作成 (`src/parser/github_actions.rs`内の`#[cfg(test)]`)
   - workflowファイルから`uses:`を抽出できることを確認
   - `actions/checkout@v3`のようなアクション参照をパースできることを確認
   - バージョンタグとハッシュの両方に対応
@@ -182,7 +182,7 @@
 
 #### 4.2 GitHub Releases APIの実装
 
-- [ ] [RED] GitHub Releases APIのテスト作成 (`tests/version/github_test.rs`)
+- [ ] [RED] GitHub Releases APIのテスト作成 (`src/version/registries/github.rs`内の`#[cfg(test)]`)
   - モックAPIサーバー（mockito）でテスト
   - `fetch_all_versions()`で全リリースを取得できることを確認
   - タグ名からバージョンを抽出（`v1.2.3` → `1.2.3`）
@@ -203,7 +203,7 @@
 
 #### 5.1 チェック統合ロジック
 
-- [ ] [RED] バージョンチェッカーのテスト作成 (`tests/version/checker_test.rs`)
+- [ ] [RED] バージョンチェッカーのテスト作成 (`src/version/checker.rs`内の`#[cfg(test)]`)
   - `check_version()`でキャッシュから最新バージョンを取得し、現在のバージョンと比較
   - `CheckResult`を返すことを確認
 
@@ -238,13 +238,13 @@
 #### 6.2 キャッシュの初期化
 
 - [ ] [RED] LSP起動時のキャッシュ初期化テスト作成
-  - 起動時に`get_stale_packages()`が呼ばれることを確認
+  - 起動時に`get_packages_needing_refresh()`が呼ばれることを確認
   - バックグラウンドタスクが起動されることを確認
 
 - [ ] [GREEN] キャッシュ初期化の実装
   - サーバー起動時に`Cache::new()`を呼び出し
   - `tokio::spawn()`でバックグラウンド更新タスクを起動
-  - `get_stale_packages()`で古いパッケージを取得し、レジストリから更新
+  - `get_packages_needing_refresh()`で古いパッケージを取得し、レジストリから更新
 
 - [ ] [REFACTOR] エラーログとメトリクス
   - 更新失敗時のログ
@@ -256,7 +256,7 @@
 
 #### 7.1 Diagnostics生成
 
-- [ ] [RED] Diagnostics生成のテスト作成 (`tests/lsp/diagnostics_test.rs`)
+- [ ] [RED] Diagnostics生成のテスト作成 (`src/lsp/diagnostics.rs`内の`#[cfg(test)]`)
   - `CheckResult`から`Diagnostic`を生成できることを確認
   - メッセージが正しい形式（英語）であることを確認
 
@@ -305,7 +305,7 @@
 
 #### 9.1 package.jsonパーサーの実装
 
-- [ ] [RED] package.jsonパーサーのテスト作成 (`tests/parser/package_json_test.rs`)
+- [ ] [RED] package.jsonパーサーのテスト作成 (`src/parser/package_json.rs`内の`#[cfg(test)]`)
   - `dependencies`、`devDependencies`を抽出できることを確認
   - バージョン範囲（`^1.0.0`、`~1.0.0`等）のパース
 
@@ -322,7 +322,7 @@
 
 #### 10.1 npm registry APIの実装
 
-- [ ] [RED] npm registry APIのテスト作成 (`tests/version/npm_test.rs`)
+- [ ] [RED] npm registry APIのテスト作成 (`src/version/registries/npm.rs`内の`#[cfg(test)]`)
   - モックAPIサーバーでテスト
   - `fetch_all_versions()`で全バージョンを取得できることを確認
 
@@ -340,7 +340,7 @@
 
 #### 11.1 Cargo.tomlパーサーの実装
 
-- [ ] [RED] Cargo.tomlパーサーのテスト作成 (`tests/parser/cargo_toml_test.rs`)
+- [ ] [RED] Cargo.tomlパーサーのテスト作成 (`src/parser/cargo_toml.rs`内の`#[cfg(test)]`)
   - `[dependencies]`、`[dev-dependencies]`を抽出できることを確認
 
 - [ ] [GREEN] Cargo.tomlパーサーの実装 (`src/parser/cargo_toml.rs`)
@@ -357,7 +357,7 @@
 
 #### 12.1 crates.io APIの実装
 
-- [ ] [RED] crates.io APIのテスト作成 (`tests/version/crates_io_test.rs`)
+- [ ] [RED] crates.io APIのテスト作成 (`src/version/registries/crates_io.rs`内の`#[cfg(test)]`)
   - モックAPIサーバーでテスト
   - `fetch_all_versions()`で全バージョンを取得できることを確認
 
@@ -374,7 +374,7 @@
 
 #### 13.1 go.modパーサーの実装
 
-- [ ] [RED] go.modパーサーのテスト作成 (`tests/parser/go_mod_test.rs`)
+- [ ] [RED] go.modパーサーのテスト作成 (`src/parser/go_mod.rs`内の`#[cfg(test)]`)
   - `require`ディレクティブを抽出できることを確認
 
 - [ ] [GREEN] go.modパーサーの実装 (`src/parser/go_mod.rs`)
@@ -392,7 +392,7 @@
 
 #### 14.1 Go proxy APIの実装
 
-- [ ] [RED] Go proxy APIのテスト作成 (`tests/version/go_proxy_test.rs`)
+- [ ] [RED] Go proxy APIのテスト作成 (`src/version/registries/go_proxy.rs`内の`#[cfg(test)]`)
   - モックAPIサーバーでテスト
   - `fetch_all_versions()`で全バージョンを取得できることを確認
 

@@ -200,7 +200,7 @@ impl Cache {
         }
     }
 
-    pub fn get_stale_packages(&self) -> Result<Vec<(String, String)>, CacheError> {
+    pub fn get_packages_needing_refresh(&self) -> Result<Vec<(String, String)>, CacheError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -354,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn get_stale_packages_returns_packages_older_than_refresh_interval() {
+    fn get_packages_needing_refresh_returns_packages_older_than_refresh_interval() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         // refresh_interval = 100ms
@@ -370,14 +370,14 @@ mod tests {
         // Wait for packages to become stale
         std::thread::sleep(std::time::Duration::from_millis(150));
 
-        let stale = cache.get_stale_packages().unwrap();
+        let stale = cache.get_packages_needing_refresh().unwrap();
         assert_eq!(stale.len(), 2);
         assert!(stale.contains(&("npm".to_string(), "axios".to_string())));
         assert!(stale.contains(&("npm".to_string(), "lodash".to_string())));
     }
 
     #[test]
-    fn get_stale_packages_excludes_fresh_packages() {
+    fn get_packages_needing_refresh_excludes_fresh_packages() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         // refresh_interval = 1 hour (in ms)
@@ -387,7 +387,7 @@ mod tests {
             .replace_versions("npm", "axios", vec!["1.0.0".to_string()])
             .unwrap();
 
-        let stale = cache.get_stale_packages().unwrap();
+        let stale = cache.get_packages_needing_refresh().unwrap();
         assert!(stale.is_empty());
     }
 }
