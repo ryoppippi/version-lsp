@@ -17,6 +17,18 @@ paths: src/**/*.rs, tests/**/*.rs
 - Convert multiple similar test cases into a single parameterized test
 - Use `#[rstest]` with `#[case(...)]` attributes for test parameters
 
+### When to Convert to Parameterized Tests
+
+**Convert when:**
+- Test structure is identical (setup → execute → assert pattern)
+- Only input values and expected outputs differ
+- Multiple tests verify the same behavior with different data
+
+**Do NOT convert when:**
+- Test setup logic differs significantly between cases
+- Tests verify different behaviors (not just different inputs)
+- Each test requires unique assertions or error handling
+
 Example:
 ```rust
 #[rstest]
