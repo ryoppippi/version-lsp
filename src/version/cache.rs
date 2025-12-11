@@ -325,8 +325,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn get_latest_version_returns_first_version() {
+    #[rstest]
+    #[case("npm", "axios", Some("1.0.0".to_string()))]
+    #[case("npm", "nonexistent", None)]
+    #[case("crates", "axios", None)]
+    fn get_latest_version_returns_expected(
+        #[case] registry_type: &str,
+        #[case] package_name: &str,
+        #[case] expected: Option<String>,
+    ) {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let mut cache = Cache::new(&db_path, 86400).unwrap();
@@ -338,18 +345,12 @@ mod tests {
         ];
         cache.replace_versions("npm", "axios", versions).unwrap();
 
-        let latest = cache.get_latest_version("npm", "axios").unwrap();
-        assert_eq!(latest, Some("1.0.0".to_string()));
-    }
-
-    #[test]
-    fn get_latest_version_returns_none_for_nonexistent_package() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let cache = Cache::new(&db_path, 86400).unwrap();
-
-        let latest = cache.get_latest_version("npm", "nonexistent").unwrap();
-        assert_eq!(latest, None);
+        assert_eq!(
+            cache
+                .get_latest_version(registry_type, package_name)
+                .unwrap(),
+            expected
+        );
     }
 
     #[test]
