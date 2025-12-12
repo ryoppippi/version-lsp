@@ -312,21 +312,21 @@
 
 ---
 
-### Phase 8: 統合テスト
+### Phase 8: 統合テスト ✅
 
 #### 8.1 E2Eテスト
 
-- [ ] [RED] E2Eテストの作成 (`tests/integration/e2e_test.rs`)
-  - 実際のworkflowファイルを開く
-  - Diagnosticsが正しく返されることを確認
+- [x] [RED] E2Eテストの作成 (`tests/e2e_test.rs`)
+  - ワークフローファイルをパースしてDiagnosticsを生成
+  - 各シナリオのテスト（最新、古い、存在しない、キャッシュなし、混在）
 
-- [ ] [GREEN] テストフィクスチャの準備
-  - サンプルワークフローファイル（`.github/workflows/test.yml`）
-  - モックレジストリレスポンス
+- [x] [GREEN] テストフィクスチャの準備
+  - インラインでワークフローコンテンツを定義
+  - `create_test_cache_with_versions`ヘルパー関数でモックキャッシュを作成
 
-- [ ] [REFACTOR] テストの安定化
-  - タイムアウト設定
-  - リトライロジック
+- [x] [REFACTOR] テストの安定化
+  - semver形式のバージョン（4.0.0）を使用してパース結果と一致させる
+  - tempfileでテストごとに独立したDBを使用
 
 ---
 

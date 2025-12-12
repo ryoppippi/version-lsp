@@ -61,6 +61,26 @@ fn test_something(#[case] input: &str, #[case] expected: &str) {
 }
 ```
 
+## Assertion Rules
+
+### Use Exact Match for String Assertions
+
+Always use `assert_eq!` for exact match comparisons instead of `contains()` or partial matches:
+
+```rust
+// Good: Exact match - catches unintended message changes
+assert_eq!(params.message, "Update available: 3.0.0 -> 4.0.0");
+
+// Bad: Partial match - may pass even with incorrect messages
+assert!(params.message.contains("3.0.0"));
+assert!(params.message.contains("4.0.0"));
+```
+
+**Why:**
+- Exact match catches unintended changes to message format
+- Partial match may pass even when the message is fundamentally wrong
+- Tests serve as specification - exact match documents the expected output precisely
+
 ## Test Organization
 
 - Place unit tests in the same file as the implementation using `#[cfg(test)] mod tests`

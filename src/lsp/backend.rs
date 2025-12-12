@@ -61,6 +61,20 @@ impl Backend<Cache> {
 }
 
 impl<S: VersionStorer> Backend<S> {
+    /// Build a Backend with custom storer and registries
+    pub fn build(
+        client: Client,
+        storer: Arc<S>,
+        registries: HashMap<RegistryType, Arc<dyn Registry>>,
+    ) -> Self {
+        Self {
+            client,
+            storer: Some(storer),
+            parsers: Self::initialize_parsers(),
+            registries,
+        }
+    }
+
     fn initialize_parsers() -> HashMap<RegistryType, Arc<dyn Parser>> {
         let mut parsers: HashMap<RegistryType, Arc<dyn Parser>> = HashMap::new();
         parsers.insert(
