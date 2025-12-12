@@ -334,16 +334,17 @@
 
 #### 9.1 package.jsonパーサーの実装
 
-- [ ] [RED] package.jsonパーサーのテスト作成 (`src/parser/package_json.rs`内の`#[cfg(test)]`)
+- [x] [RED] package.jsonパーサーのテスト作成 (`src/parser/package_json.rs`内の`#[cfg(test)]`)
   - `dependencies`、`devDependencies`を抽出できることを確認
   - バージョン範囲（`^1.0.0`、`~1.0.0`等）のパース
 
-- [ ] [GREEN] package.jsonパーサーの実装 (`src/parser/package_json.rs`)
+- [x] [GREEN] package.jsonパーサーの実装 (`src/parser/package_json.rs`)
   - tree-sitter-jsonを使用
   - `dependencies`、`devDependencies`、`peerDependencies`の抽出
 
-- [ ] [REFACTOR] バージョン範囲の正規化
-  - `^1.0.0` → `1.0.0`（比較用）
+- [x] [REFACTOR] バージョン範囲の正規化
+  - npm registry API統合時（Phase 10）に実装予定
+  - パーサーはソースのバージョン文字列をそのまま抽出
 
 ---
 
@@ -351,17 +352,31 @@
 
 #### 10.1 npm registry APIの実装
 
-- [ ] [RED] npm registry APIのテスト作成 (`src/version/registries/npm.rs`内の`#[cfg(test)]`)
+- [x] [RED] npm registry APIのテスト作成 (`src/version/registries/npm.rs`内の`#[cfg(test)]`)
   - モックAPIサーバーでテスト
   - `fetch_all_versions()`で全バージョンを取得できることを確認
 
-- [ ] [GREEN] npm registry APIの実装 (`src/version/registries/npm.rs`)
+- [x] [GREEN] npm registry APIの実装 (`src/version/registries/npm.rs`)
   - reqwestでnpm registry (`https://registry.npmjs.org/{package}`)を呼び出し
   - `versions`フィールドから全バージョンを抽出
 
-- [ ] [REFACTOR] エラーハンドリング
+- [x] [REFACTOR] エラーハンドリング
   - 存在しないパッケージ（404）
   - scoped packages (`@types/node`)の対応
+
+#### 10.2 package.json統合とE2Eテスト
+
+- [ ] [RED] E2Eテスト作成 (`tests/lsp_e2e_test.rs`)
+  - package.jsonのdidOpen時にdiagnosticsが発行されることを確認
+  - 古いバージョン、存在しないバージョンのケース
+
+- [ ] [GREEN] Backend統合
+  - `initialize_parsers()`に`PackageJsonParser`を追加
+  - `initialize_registries()`に`NpmRegistry`を追加
+
+- [ ] [REFACTOR] バージョン範囲の正規化
+  - `^1.0.0` → `1.0.0`（npm registry比較用）
+  - semver.rsに正規化関数を追加
 
 ---
 

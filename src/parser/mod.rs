@@ -7,9 +7,11 @@
 //! - go_mod.rs: go.mod parser
 
 pub mod github_actions;
+pub mod package_json;
 pub mod traits;
 pub mod types;
 
 pub use github_actions::GitHubActionsParser;
+pub use package_json::PackageJsonParser;
 pub use traits::{ParseError, Parser};
 pub use types::{PackageInfo, RegistryType};

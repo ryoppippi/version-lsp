@@ -81,6 +81,44 @@ assert!(params.message.contains("4.0.0"));
 - Partial match may pass even when the message is fundamentally wrong
 - Tests serve as specification - exact match documents the expected output precisely
 
+### Compare Entire Structs, Not Individual Fields
+
+When testing structs, compare the entire struct instead of individual fields:
+
+```rust
+// Good: Compare entire struct - catches missing or incorrect fields
+assert_eq!(
+    result,
+    PackageInfo {
+        name: "lodash".to_string(),
+        version: "4.17.21".to_string(),
+        registry_type: RegistryType::Npm,
+        start_offset: 57,
+        end_offset: 64,
+        line: 3,
+        column: 15,
+    }
+);
+
+// Bad: Individual field assertions - may miss incorrect fields
+assert_eq!(result.name, "lodash");
+assert_eq!(result.version, "4.17.21");
+assert_eq!(result.registry_type, RegistryType::Npm);
+```
+
+**Why:**
+- Full struct comparison catches changes to any field
+- Individual field assertions may miss newly added or changed fields
+- Tests serve as complete specification of expected output
+
+**For collections with non-deterministic order (e.g., HashMap keys):**
+```rust
+// Sort before comparing
+let mut versions = result.versions;
+versions.sort();
+assert_eq!(versions, vec!["1.0.0".to_string(), "2.0.0".to_string()]);
+```
+
 ## Test Organization
 
 - Place unit tests in the same file as the implementation using `#[cfg(test)] mod tests`
