@@ -364,7 +364,94 @@
   - 存在しないパッケージ（404）
   - scoped packages (`@types/node`)の対応
 
-#### 10.2 package.json統合とE2Eテスト
+---
+
+### Phase 10.5: VersionMatcher 抽象化（リファクタリング）
+
+レジストリごとのバージョンマッチングロジックを抽象化し、npm等の新しいレジストリ追加を容易にする。
+npm の範囲指定 (`^1.0.0`, `~1.0.0`) と GitHub Actions の部分マッチング (`v6` → `v6.x.x`) を統一的に扱えるようにする。
+
+参照: `docs/DESIGN-version-comparison.md`
+
+#### 10.5.1 VersionMatcher トレイト定義
+
+- [x] [STRUCTURAL] VersionMatcher トレイトの定義 (`src/version/matcher.rs`)
+  - `VersionMatcher` トレイト定義
+  - `registry_type(&self) -> RegistryType`
+  - `version_exists(&self, version_spec: &str, available_versions: &[String]) -> bool`
+  - `compare_to_latest(&self, current_version: &str, latest_version: &str) -> CompareResult`
+
+#### 10.5.2 GitHubActionsMatcher 実装
+
+- [x] [RED] GitHubActionsMatcher のテスト作成 (`src/version/matchers/github_actions.rs`内の`#[cfg(test)]`)
+  - 部分バージョンマッチング (`v6` → `v6.x.x`) のテスト
+  - バージョン比較のテスト（メジャーのみ、メジャー.マイナー、フルバージョン）
+
+- [x] [GREEN] GitHubActionsMatcher の実装 (`src/version/matchers/github_actions.rs`)
+  - `semver.rs` の既存ロジック (`version_matches_any`, `compare_versions`) を移行
+  - `VersionMatcher` トレイトを実装
+
+- [x] [REFACTOR] semver.rs の整理
+  - GitHub Actions 固有のロジックを `GitHubActionsMatcher` に集約
+  - `semver.rs` には共通ユーティリティ (`normalize_version`) のみ残す
+
+#### 10.5.3 checker.rs 更新
+
+- [ ] [RED] compare_version の新シグネチャのテスト作成
+  - `compare_version(storer, matcher, package_name, version)` 形式のテスト
+  - 既存テストケースを新シグネチャに対応
+
+- [ ] [GREEN] compare_version の更新 (`src/version/checker.rs`)
+  - `registry_type: &str` パラメータを `matcher: &dyn VersionMatcher` に変更
+  - `matcher.version_exists()` と `matcher.compare_to_latest()` を使用
+
+- [ ] [REFACTOR] 既存テストの更新
+  - MockStorer を使用したテストを新シグネチャに対応
+
+#### 10.5.4 diagnostics.rs 更新
+
+- [ ] [RED] generate_diagnostics の新シグネチャのテスト作成
+  - `generate_diagnostics(parser, matcher, storer, content)` 形式のテスト
+
+- [ ] [GREEN] generate_diagnostics の更新 (`src/lsp/diagnostics.rs`)
+  - `matcher: &dyn VersionMatcher` パラメータを追加
+  - `compare_version()` 呼び出しに matcher を渡す
+
+- [ ] [REFACTOR] 既存テストの更新
+  - MockVersionMatcher を導入してテストを更新
+
+#### 10.5.5 Backend 統合
+
+- [ ] [GREEN] Backend に matchers HashMap を追加 (`src/lsp/backend.rs`)
+  - `matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>>` フィールド追加
+  - `initialize_matchers()` メソッド追加
+  - `generate_diagnostics()` 呼び出しを更新
+
+- [ ] [REFACTOR] 動作確認
+  - 既存の GitHub Actions ワークフローに対する動作確認
+  - 全テスト通過確認
+
+---
+
+### Phase 10.6: NpmVersionMatcher 実装
+
+#### 10.6.1 NpmVersionMatcher 実装
+
+- [ ] [RED] NpmVersionMatcher のテスト作成 (`src/version/matchers/npm.rs`内の`#[cfg(test)]`)
+  - 範囲指定のテスト (`^1.0.0`, `~1.0.0`, `>=1.0.0`, etc.)
+  - 完全一致のテスト (`1.0.0`)
+  - 無効な範囲指定のテスト
+
+- [ ] [GREEN] NpmVersionMatcher の実装 (`src/version/matchers/npm.rs`)
+  - 範囲指定のパース (`^`, `~`, `>=`, `>`, `<=`, `<`, `x`, `*`)
+  - 範囲内で最新バージョンを見つける
+  - `VersionMatcher` トレイトを実装
+
+- [ ] [REFACTOR] エッジケースの対応
+  - プレリリースバージョンの処理
+  - ワイルドカード (`x`, `*`) の処理
+
+#### 10.6.2 package.json統合とE2Eテスト
 
 - [ ] [RED] E2Eテスト作成 (`tests/lsp_e2e_test.rs`)
   - package.jsonのdidOpen時にdiagnosticsが発行されることを確認
@@ -373,10 +460,11 @@
 - [ ] [GREEN] Backend統合
   - `initialize_parsers()`に`PackageJsonParser`を追加
   - `initialize_registries()`に`NpmRegistry`を追加
+  - `initialize_matchers()`に`NpmVersionMatcher`を追加
 
-- [ ] [REFACTOR] バージョン範囲の正規化
-  - `^1.0.0` → `1.0.0`（npm registry比較用）
-  - semver.rsに正規化関数を追加
+- [ ] [REFACTOR] 動作確認
+  - package.json に対する動作確認
+  - 全テスト通過確認
 
 ---
 
