@@ -4,7 +4,8 @@
 use mockall::automock;
 
 use crate::version::error::CacheError;
-use crate::version::semver::{CompareResult, compare_versions, version_matches_any};
+use crate::version::matcher::VersionMatcher;
+use crate::version::semver::CompareResult;
 
 use crate::version::cache::PackageId;
 
@@ -76,10 +77,12 @@ pub enum VersionStatus {
 /// Compare the version status for a package
 pub fn compare_version<S: VersionStorer>(
     storer: &S,
-    registry_type: &str,
+    matcher: &dyn VersionMatcher,
     package_name: &str,
     current_version: &str,
 ) -> Result<VersionCompareResult, CacheError> {
+    let registry_type = matcher.registry_type().as_str();
+
     // Get latest version from storer
     let latest_version = storer.get_latest_version(registry_type, package_name)?;
 
@@ -92,12 +95,12 @@ pub fn compare_version<S: VersionStorer>(
         });
     };
 
-    // Check if current version exists in registry using partial version matching
+    // Check if current version exists in registry
     let all_versions = storer.get_versions(registry_type, package_name)?;
-    let version_exists = version_matches_any(current_version, &all_versions);
+    let version_exists = matcher.version_exists(current_version, &all_versions);
 
     // Compare versions
-    let status = match compare_versions(current_version, &latest) {
+    let status = match matcher.compare_to_latest(current_version, &latest) {
         CompareResult::Invalid => VersionStatus::Invalid,
         _ if !version_exists => VersionStatus::NotFound,
         CompareResult::Latest => VersionStatus::Latest,
@@ -115,6 +118,7 @@ pub fn compare_version<S: VersionStorer>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::version::matchers::GitHubActionsMatcher;
     use rstest::rstest;
 
     /// Mock storer for testing
@@ -185,9 +189,9 @@ mod tests {
         #[case] expected: VersionStatus,
     ) {
         let storer = MockStorer::new(Some(latest), existing);
+        let matcher = GitHubActionsMatcher;
 
-        let result =
-            compare_version(&storer, "github_actions", "actions/checkout", current).unwrap();
+        let result = compare_version(&storer, &matcher, "actions/checkout", current).unwrap();
 
         assert_eq!(result.current_version, current);
         assert_eq!(result.latest_version, Some(latest.to_string()));
@@ -197,9 +201,9 @@ mod tests {
     #[test]
     fn compare_version_returns_not_in_cache_when_package_not_cached() {
         let storer = MockStorer::new(None, vec![]);
+        let matcher = GitHubActionsMatcher;
 
-        let result =
-            compare_version(&storer, "github_actions", "nonexistent/repo", "1.0.0").unwrap();
+        let result = compare_version(&storer, &matcher, "nonexistent/repo", "1.0.0").unwrap();
 
         assert_eq!(
             result,
@@ -229,9 +233,9 @@ mod tests {
         #[case] expected: VersionStatus,
     ) {
         let storer = MockStorer::new(Some(latest), existing);
+        let matcher = GitHubActionsMatcher;
 
-        let result =
-            compare_version(&storer, "github_actions", "actions/checkout", current).unwrap();
+        let result = compare_version(&storer, &matcher, "actions/checkout", current).unwrap();
 
         assert_eq!(result.status, expected);
     }
