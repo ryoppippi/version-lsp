@@ -14,6 +14,8 @@ use crate::parser::traits::Parser;
 use crate::parser::types::{RegistryType, detect_parser_type};
 use crate::version::cache::Cache;
 use crate::version::checker::VersionStorer;
+use crate::version::matcher::VersionMatcher;
+use crate::version::matchers::GitHubActionsMatcher;
 use crate::version::registries::github::GitHubRegistry;
 use crate::version::registry::Registry;
 
@@ -21,6 +23,7 @@ pub struct Backend<S: VersionStorer> {
     client: Client,
     storer: Option<Arc<S>>,
     parsers: HashMap<RegistryType, Arc<dyn Parser>>,
+    matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>>,
     registries: HashMap<RegistryType, Arc<dyn Registry>>,
 }
 
@@ -28,11 +31,13 @@ impl Backend<Cache> {
     pub fn new(client: Client) -> Self {
         let storer = Self::initialize_storer();
         let parsers = Self::initialize_parsers();
+        let matchers = Self::initialize_matchers();
         let registries = Self::initialize_registries();
         Self {
             client,
             storer,
             parsers,
+            matchers,
             registries,
         }
     }
@@ -71,6 +76,7 @@ impl<S: VersionStorer> Backend<S> {
             client,
             storer: Some(storer),
             parsers: Self::initialize_parsers(),
+            matchers: Self::initialize_matchers(),
             registries,
         }
     }
@@ -82,6 +88,15 @@ impl<S: VersionStorer> Backend<S> {
             Arc::new(GitHubActionsParser::new()),
         );
         parsers
+    }
+
+    fn initialize_matchers() -> HashMap<RegistryType, Arc<dyn VersionMatcher>> {
+        let mut matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>> = HashMap::new();
+        matchers.insert(
+            RegistryType::GitHubActions,
+            Arc::new(GitHubActionsMatcher),
+        );
+        matchers
     }
 
     fn initialize_registries() -> HashMap<RegistryType, Arc<dyn Registry>> {
@@ -156,6 +171,10 @@ impl<S: VersionStorer> Backend<S> {
             return;
         };
 
+        let Some(matcher) = self.matchers.get(&parser_type) else {
+            return;
+        };
+
         let Some(storer) = &self.storer else {
             self.client
                 .log_message(
@@ -169,7 +188,7 @@ impl<S: VersionStorer> Backend<S> {
         // Parse document to get packages (needed for on-demand fetch)
         let packages = parser.parse(&content).unwrap_or_default();
 
-        let diagnostics = generate_diagnostics(&**parser, &**storer, &content);
+        let diagnostics = generate_diagnostics(&**parser, &**matcher, &**storer, &content);
 
         self.client
             .log_message(
@@ -195,6 +214,7 @@ impl<S: VersionStorer> Backend<S> {
             let storer = storer.clone();
             let client = self.client.clone();
             let parser = parser.clone();
+            let matcher = matcher.clone();
 
             tokio::spawn(async move {
                 let fetched = fetch_missing_packages(&*storer, &*registry, &packages).await;
@@ -210,7 +230,7 @@ impl<S: VersionStorer> Backend<S> {
                         )
                         .await;
 
-                    let diagnostics = generate_diagnostics(&*parser, &*storer, &content);
+                    let diagnostics = generate_diagnostics(&*parser, &*matcher, &*storer, &content);
 
                     client.publish_diagnostics(uri, diagnostics, None).await;
                 }
