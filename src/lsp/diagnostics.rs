@@ -5,14 +5,16 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use crate::parser::traits::Parser;
 use crate::parser::types::PackageInfo;
 use crate::version::checker::{
-    VersionCompareResult, VersionStatus, VersionStorer, compare_version,
+    compare_version, VersionCompareResult, VersionStatus, VersionStorer,
 };
+use crate::version::matcher::VersionMatcher;
 
 const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// Generate diagnostics for a document by parsing and checking versions
 pub fn generate_diagnostics<S: VersionStorer>(
     parser: &dyn Parser,
+    matcher: &dyn VersionMatcher,
     storer: &S,
     content: &str,
 ) -> Vec<Diagnostic> {
@@ -21,13 +23,7 @@ pub fn generate_diagnostics<S: VersionStorer>(
     packages
         .iter()
         .filter_map(|package| {
-            let result = compare_version(
-                storer,
-                package.registry_type.as_str(),
-                &package.name,
-                &package.version,
-            )
-            .ok()?;
+            let result = compare_version(storer, matcher, &package.name, &package.version).ok()?;
             create_diagnostic(package, &result)
         })
         .collect()
@@ -90,6 +86,7 @@ mod tests {
     use crate::parser::traits::MockParser;
     use crate::parser::types::RegistryType;
     use crate::version::checker::MockVersionStorer;
+    use crate::version::matchers::GitHubActionsMatcher;
     use rstest::rstest;
 
     fn make_package_info(name: &str, version: &str, line: usize, column: usize) -> PackageInfo {
@@ -162,8 +159,9 @@ mod tests {
                 Ok(vec!["4.0.0".to_string()])
             }
         });
+        let matcher = GitHubActionsMatcher;
 
-        let diagnostics = generate_diagnostics(&parser, &storer, "content");
+        let diagnostics = generate_diagnostics(&parser, &matcher, &storer, "content");
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].severity, Some(expected_severity));
@@ -184,8 +182,9 @@ mod tests {
         storer
             .expect_get_versions()
             .returning(|_, _| Ok(vec!["4.0.0".to_string()]));
+        let matcher = GitHubActionsMatcher;
 
-        let diagnostics = generate_diagnostics(&parser, &storer, "content");
+        let diagnostics = generate_diagnostics(&parser, &matcher, &storer, "content");
 
         assert!(diagnostics.is_empty());
     }
@@ -201,8 +200,9 @@ mod tests {
         storer
             .expect_get_latest_version()
             .returning(|_, _| Ok(None));
+        let matcher = GitHubActionsMatcher;
 
-        let diagnostics = generate_diagnostics(&parser, &storer, "content");
+        let diagnostics = generate_diagnostics(&parser, &matcher, &storer, "content");
 
         assert!(diagnostics.is_empty());
     }
@@ -230,8 +230,9 @@ mod tests {
         storer
             .expect_get_versions()
             .returning(|_, _| Ok(vec!["3.0.0".to_string(), "4.0.0".to_string()]));
+        let matcher = GitHubActionsMatcher;
 
-        let diagnostics = generate_diagnostics(&parser, &storer, "content");
+        let diagnostics = generate_diagnostics(&parser, &matcher, &storer, "content");
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
