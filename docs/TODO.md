@@ -397,37 +397,37 @@ npm の範囲指定 (`^1.0.0`, `~1.0.0`) と GitHub Actions の部分マッチ�
 
 #### 10.5.3 checker.rs 更新
 
-- [ ] [RED] compare_version の新シグネチャのテスト作成
+- [x] [RED] compare_version の新シグネチャのテスト作成
   - `compare_version(storer, matcher, package_name, version)` 形式のテスト
   - 既存テストケースを新シグネチャに対応
 
-- [ ] [GREEN] compare_version の更新 (`src/version/checker.rs`)
+- [x] [GREEN] compare_version の更新 (`src/version/checker.rs`)
   - `registry_type: &str` パラメータを `matcher: &dyn VersionMatcher` に変更
   - `matcher.version_exists()` と `matcher.compare_to_latest()` を使用
 
-- [ ] [REFACTOR] 既存テストの更新
+- [x] [REFACTOR] 既存テストの更新
   - MockStorer を使用したテストを新シグネチャに対応
 
 #### 10.5.4 diagnostics.rs 更新
 
-- [ ] [RED] generate_diagnostics の新シグネチャのテスト作成
+- [x] [RED] generate_diagnostics の新シグネチャのテスト作成
   - `generate_diagnostics(parser, matcher, storer, content)` 形式のテスト
 
-- [ ] [GREEN] generate_diagnostics の更新 (`src/lsp/diagnostics.rs`)
+- [x] [GREEN] generate_diagnostics の更新 (`src/lsp/diagnostics.rs`)
   - `matcher: &dyn VersionMatcher` パラメータを追加
   - `compare_version()` 呼び出しに matcher を渡す
 
-- [ ] [REFACTOR] 既存テストの更新
-  - MockVersionMatcher を導入してテストを更新
+- [x] [REFACTOR] 既存テストの更新
+  - GitHubActionsMatcher を使用してテストを更新
 
 #### 10.5.5 Backend 統合
 
-- [ ] [GREEN] Backend に matchers HashMap を追加 (`src/lsp/backend.rs`)
+- [x] [GREEN] Backend に matchers HashMap を追加 (`src/lsp/backend.rs`)
   - `matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>>` フィールド追加
   - `initialize_matchers()` メソッド追加
   - `generate_diagnostics()` 呼び出しを更新
 
-- [ ] [REFACTOR] 動作確認
+- [x] [REFACTOR] 動作確認
   - 既存の GitHub Actions ワークフローに対する動作確認
   - 全テスト通過確認
 
