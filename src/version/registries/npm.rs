@@ -4,17 +4,18 @@ use crate::parser::types::RegistryType;
 use crate::version::error::RegistryError;
 use crate::version::registry::Registry;
 use crate::version::types::PackageVersions;
+use indexmap::IndexMap;
 use serde::Deserialize;
-use std::collections::HashMap;
 use tracing::warn;
 
 /// Default base URL for npm registry
 const DEFAULT_BASE_URL: &str = "https://registry.npmjs.org";
 
 /// Response from npm registry API
+/// Uses IndexMap to preserve insertion order from JSON
 #[derive(Debug, Deserialize)]
 struct NpmPackageResponse {
-    versions: HashMap<String, serde_json::Value>,
+    versions: IndexMap<String, serde_json::Value>,
 }
 
 /// Registry implementation for npm registry API
