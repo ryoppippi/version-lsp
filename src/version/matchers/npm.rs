@@ -15,6 +15,133 @@ use crate::version::semver::CompareResult;
 
 pub struct NpmVersionMatcher;
 
+/// Top-level version specification parser
+/// Handles compound ranges (AND, OR) as well as simple ranges
+#[derive(Debug)]
+enum VersionSpec {
+    /// Single range (^1.0.0, >=1.0.0, etc.)
+    Single(VersionRange),
+    /// AND of ranges (>=1.0.0 <2.0.0) - space-separated, all must satisfy
+    And(Vec<VersionSpec>),
+    /// OR of specs (^1.0.0 || ^2.0.0) - any must satisfy
+    Or(Vec<VersionSpec>),
+}
+
+impl VersionSpec {
+    /// Parse a version specification string
+    fn parse(spec: &str) -> Option<Self> {
+        let spec = spec.trim();
+        if spec.is_empty() {
+            return None;
+        }
+
+        // First, check for OR (||) - lowest precedence
+        if spec.contains("||") {
+            let or_parts: Vec<&str> = spec.split("||").map(|s| s.trim()).collect();
+            if or_parts.len() > 1 {
+                let specs: Option<Vec<VersionSpec>> = or_parts
+                    .into_iter()
+                    .map(Self::parse_and_or_single)
+                    .collect();
+                return specs.map(VersionSpec::Or);
+            }
+        }
+
+        // No OR, parse as AND or single
+        Self::parse_and_or_single(spec)
+    }
+
+    /// Parse a spec that may be AND (space-separated) or a single range
+    fn parse_and_or_single(spec: &str) -> Option<Self> {
+        let spec = spec.trim();
+        if spec.is_empty() {
+            return None;
+        }
+
+        // Check for hyphen range first (contains " - " but is not AND)
+        if VersionRange::parse_hyphen(spec).is_some() {
+            return VersionRange::parse(spec).map(VersionSpec::Single);
+        }
+
+        // Try to split by spaces for AND ranges
+        // Be careful not to split hyphen ranges incorrectly
+        let parts = Self::split_and_parts(spec);
+
+        if parts.len() > 1 {
+            // Multiple parts = AND range
+            let ranges: Option<Vec<VersionSpec>> = parts
+                .into_iter()
+                .map(|p| VersionRange::parse(p).map(VersionSpec::Single))
+                .collect();
+            ranges.map(VersionSpec::And)
+        } else {
+            // Single range
+            VersionRange::parse(spec).map(VersionSpec::Single)
+        }
+    }
+
+    /// Split spec into AND parts (space-separated ranges)
+    fn split_and_parts(spec: &str) -> Vec<&str> {
+        let mut parts = Vec::new();
+        let mut current_start = 0;
+        let chars: Vec<char> = spec.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == ' ' {
+                // Check if this space is part of a range operator or separator
+                let before = &spec[current_start..i].trim();
+                if !before.is_empty() {
+                    // Check if this might be a hyphen range separator " - "
+                    // Look ahead for " - " pattern
+                    if i + 2 < chars.len() && chars[i + 1] == '-' && chars[i + 2] == ' ' {
+                        // This is a hyphen range, skip to after " - "
+                        i += 3;
+                        continue;
+                    }
+
+                    // This is a space separator for AND
+                    parts.push(*before);
+                    current_start = i + 1;
+                }
+            }
+            i += 1;
+        }
+
+        // Add the last part
+        let last = spec[current_start..].trim();
+        if !last.is_empty() {
+            parts.push(last);
+        }
+
+        parts
+    }
+
+    /// Check if a version satisfies this spec
+    fn satisfies(&self, version: &Version) -> bool {
+        match self {
+            VersionSpec::Single(range) => range.satisfies(version),
+            VersionSpec::And(specs) => specs.iter().all(|s| s.satisfies(version)),
+            VersionSpec::Or(specs) => specs.iter().any(|s| s.satisfies(version)),
+        }
+    }
+
+    /// Get the base version from this spec (for comparison purposes)
+    fn base_version(&self) -> Option<Version> {
+        match self {
+            VersionSpec::Single(range) => range.base_version(),
+            VersionSpec::And(specs) => {
+                // For AND ranges, use the first range's base version
+                specs.first().and_then(|s| s.base_version())
+            }
+            VersionSpec::Or(specs) => {
+                // For OR ranges, use the first spec's base version
+                specs.first().and_then(|s| s.base_version())
+            }
+        }
+    }
+}
+
 /// Represents a parsed npm version range
 #[derive(Debug)]
 enum VersionRange {
@@ -38,12 +165,19 @@ enum VersionRange {
     WildcardMajor(u64),
     /// Wildcard minor: 1.2.x means >=1.2.0 <1.3.0
     WildcardMinor(u64, u64),
+    /// Hyphen range: 1.0.0 - 2.0.0 means >=1.0.0 <=2.0.0
+    Hyphen { from: Version, to: Version },
 }
 
 impl VersionRange {
     /// Parse a version specification string into a VersionRange
     fn parse(spec: &str) -> Option<Self> {
         let spec = spec.trim();
+
+        // Check for hyphen range first (e.g., "1.0.0 - 2.0.0")
+        if let Some(range) = Self::parse_hyphen(spec) {
+            return Some(range);
+        }
 
         if let Some(rest) = spec.strip_prefix(">=") {
             Version::parse(rest.trim()).ok().map(VersionRange::Gte)
@@ -64,6 +198,20 @@ impl VersionRange {
         } else {
             Version::parse(spec).ok().map(VersionRange::Exact)
         }
+    }
+
+    /// Parse hyphen range like "1.0.0 - 2.0.0"
+    fn parse_hyphen(spec: &str) -> Option<Self> {
+        // Split by " - " (with spaces)
+        let parts: Vec<&str> = spec.split(" - ").collect();
+        if parts.len() != 2 {
+            return None;
+        }
+
+        let from = Version::parse(parts[0].trim()).ok()?;
+        let to = Version::parse(parts[1].trim()).ok()?;
+
+        Some(VersionRange::Hyphen { from, to })
     }
 
     /// Parse wildcard patterns like "1.x" or "1.2.x"
@@ -122,6 +270,7 @@ impl VersionRange {
             VersionRange::WildcardMinor(major, minor) => {
                 version.major == *major && version.minor == *minor
             }
+            VersionRange::Hyphen { from, to } => version >= from && version <= to,
         }
     }
 
@@ -139,6 +288,7 @@ impl VersionRange {
             VersionRange::Any => None,
             VersionRange::WildcardMajor(major) => Some(Version::new(*major, 0, 0)),
             VersionRange::WildcardMinor(major, minor) => Some(Version::new(*major, *minor, 0)),
+            VersionRange::Hyphen { from, .. } => Some(from.clone()),
         }
     }
 }
@@ -149,19 +299,19 @@ impl VersionMatcher for NpmVersionMatcher {
     }
 
     fn version_exists(&self, version_spec: &str, available_versions: &[String]) -> bool {
-        let Some(range) = VersionRange::parse(version_spec) else {
+        let Some(spec) = VersionSpec::parse(version_spec) else {
             return false;
         };
 
         available_versions.iter().any(|v| {
             Version::parse(v)
-                .map(|ver| range.satisfies(&ver))
+                .map(|ver| spec.satisfies(&ver))
                 .unwrap_or(false)
         })
     }
 
     fn compare_to_latest(&self, current_version: &str, latest_version: &str) -> CompareResult {
-        let Some(range) = VersionRange::parse(current_version) else {
+        let Some(spec) = VersionSpec::parse(current_version) else {
             return CompareResult::Invalid;
         };
 
@@ -169,13 +319,13 @@ impl VersionMatcher for NpmVersionMatcher {
             return CompareResult::Invalid;
         };
 
-        // Check if latest is within the range
-        if range.satisfies(&latest) {
+        // Check if latest is within the spec
+        if spec.satisfies(&latest) {
             return CompareResult::Latest;
         }
 
         // For Any (*), if not satisfied (which can't happen), treat as Latest
-        let Some(base) = range.base_version() else {
+        let Some(base) = spec.base_version() else {
             return CompareResult::Latest;
         };
 
@@ -298,6 +448,77 @@ mod tests {
         );
     }
 
+    // version_exists tests - OR range (|| separated)
+    #[rstest]
+    // ^1.0.0 || ^2.0.0 means satisfy EITHER range
+    #[case("^1.0.0 || ^2.0.0", vec!["1.5.0"], true)]
+    #[case("^1.0.0 || ^2.0.0", vec!["2.5.0"], true)]
+    #[case("^1.0.0 || ^2.0.0", vec!["3.0.0"], false)]
+    #[case(">=1.0.0 <1.5.0 || >=2.0.0", vec!["1.2.0"], true)]
+    #[case(">=1.0.0 <1.5.0 || >=2.0.0", vec!["1.6.0"], false)]
+    #[case(">=1.0.0 <1.5.0 || >=2.0.0", vec!["2.5.0"], true)]
+    #[case("1.0.0 || 2.0.0 || 3.0.0", vec!["2.0.0"], true)]
+    #[case("1.0.0 || 2.0.0 || 3.0.0", vec!["4.0.0"], false)]
+    fn version_exists_or_range(
+        #[case] version_spec: &str,
+        #[case] available: Vec<&str>,
+        #[case] expected: bool,
+    ) {
+        let available: Vec<String> = available.into_iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            NpmVersionMatcher.version_exists(version_spec, &available),
+            expected
+        );
+    }
+
+    // version_exists tests - AND range (space-separated)
+    #[rstest]
+    // >=1.0.0 <2.0.0 means version must satisfy BOTH conditions
+    #[case(">=1.0.0 <2.0.0", vec!["1.0.0"], true)]
+    #[case(">=1.0.0 <2.0.0", vec!["1.5.0"], true)]
+    #[case(">=1.0.0 <2.0.0", vec!["1.9.9"], true)]
+    #[case(">=1.0.0 <2.0.0", vec!["0.9.9"], false)]
+    #[case(">=1.0.0 <2.0.0", vec!["2.0.0"], false)]
+    #[case(">1.0.0 <=2.0.0", vec!["1.0.1"], true)]
+    #[case(">1.0.0 <=2.0.0", vec!["2.0.0"], true)]
+    #[case(">1.0.0 <=2.0.0", vec!["1.0.0"], false)]
+    #[case(">=1.2.0 <1.3.0", vec!["1.2.5"], true)]
+    #[case(">=1.2.0 <1.3.0", vec!["1.3.0"], false)]
+    fn version_exists_and_range(
+        #[case] version_spec: &str,
+        #[case] available: Vec<&str>,
+        #[case] expected: bool,
+    ) {
+        let available: Vec<String> = available.into_iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            NpmVersionMatcher.version_exists(version_spec, &available),
+            expected
+        );
+    }
+
+    // version_exists tests - hyphen range
+    #[rstest]
+    // 1.0.0 - 2.0.0 matches >=1.0.0 <=2.0.0
+    #[case("1.0.0 - 2.0.0", vec!["1.0.0"], true)]
+    #[case("1.0.0 - 2.0.0", vec!["1.5.0"], true)]
+    #[case("1.0.0 - 2.0.0", vec!["2.0.0"], true)]
+    #[case("1.0.0 - 2.0.0", vec!["0.9.9"], false)]
+    #[case("1.0.0 - 2.0.0", vec!["2.0.1"], false)]
+    #[case("1.2.3 - 2.3.4", vec!["1.2.3", "2.3.4"], true)]
+    #[case("1.2.3 - 2.3.4", vec!["1.2.2"], false)]
+    #[case("1.2.3 - 2.3.4", vec!["2.3.5"], false)]
+    fn version_exists_hyphen_range(
+        #[case] version_spec: &str,
+        #[case] available: Vec<&str>,
+        #[case] expected: bool,
+    ) {
+        let available: Vec<String> = available.into_iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            NpmVersionMatcher.version_exists(version_spec, &available),
+            expected
+        );
+    }
+
     // compare_to_latest tests
     #[rstest]
     // Exact version comparison
@@ -315,6 +536,18 @@ mod tests {
     #[case("1.x", "2.0.0", CompareResult::Outdated)]
     #[case("1.2.x", "1.2.9", CompareResult::Latest)]
     #[case("1.2.x", "1.3.0", CompareResult::Outdated)]
+    // Hyphen ranges
+    #[case("1.0.0 - 2.0.0", "1.5.0", CompareResult::Latest)]
+    #[case("1.0.0 - 2.0.0", "2.0.0", CompareResult::Latest)]
+    #[case("1.0.0 - 2.0.0", "2.5.0", CompareResult::Outdated)]
+    // AND ranges
+    #[case(">=1.0.0 <2.0.0", "1.5.0", CompareResult::Latest)]
+    #[case(">=1.0.0 <2.0.0", "2.0.0", CompareResult::Outdated)]
+    #[case(">=1.0.0 <2.0.0", "0.9.0", CompareResult::Newer)]
+    // OR ranges
+    #[case("^1.0.0 || ^2.0.0", "1.5.0", CompareResult::Latest)]
+    #[case("^1.0.0 || ^2.0.0", "2.5.0", CompareResult::Latest)]
+    #[case("^1.0.0 || ^2.0.0", "3.0.0", CompareResult::Outdated)]
     // Invalid versions
     #[case("invalid", "1.0.0", CompareResult::Invalid)]
     #[case("1.0.0", "invalid", CompareResult::Invalid)]
