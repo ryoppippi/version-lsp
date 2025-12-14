@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -100,6 +101,25 @@ impl Cache {
             [],
         )?;
 
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS dist_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                package_id INTEGER NOT NULL,
+                tag_name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE,
+                UNIQUE(package_id, tag_name)
+            )
+            "#,
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dist_tags_package_id ON dist_tags(package_id)",
+            [],
+        )?;
+
         debug!("Database schema created successfully");
         Ok(())
     }
@@ -124,6 +144,82 @@ impl Cache {
 
         Ok(versions)
     }
+
+    /// Save dist tags for a package
+    pub fn save_dist_tags(
+        &self,
+        registry_type: &str,
+        package_name: &str,
+        dist_tags: &HashMap<String, String>,
+    ) -> Result<(), CacheError> {
+        if dist_tags.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+
+        // Get or create package
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        tx.execute(
+            r#"
+            INSERT INTO packages (registry_type, package_name, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(registry_type, package_name) DO NOTHING
+            "#,
+            (registry_type, package_name, now),
+        )?;
+
+        let package_id: i64 = tx.query_row(
+            "SELECT id FROM packages WHERE registry_type = ?1 AND package_name = ?2",
+            (registry_type, package_name),
+            |row| row.get(0),
+        )?;
+
+        // Delete existing dist tags and insert new ones
+        tx.execute("DELETE FROM dist_tags WHERE package_id = ?1", [package_id])?;
+
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO dist_tags (package_id, tag_name, version) VALUES (?1, ?2, ?3)",
+            )?;
+            for (tag_name, version) in dist_tags {
+                stmt.execute((package_id, tag_name, version))?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Get a specific dist tag for a package
+    pub fn get_dist_tag(
+        &self,
+        registry_type: &str,
+        package_name: &str,
+        tag_name: &str,
+    ) -> Result<Option<String>, CacheError> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            r#"
+            SELECT dt.version FROM dist_tags dt
+            JOIN packages p ON dt.package_id = p.id
+            WHERE p.registry_type = ?1 AND p.package_name = ?2 AND dt.tag_name = ?3
+            "#,
+            (registry_type, package_name, tag_name),
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(version) => Ok(Some(version)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
 impl VersionStorer for Cache {
@@ -133,6 +229,23 @@ impl VersionStorer for Cache {
         package_name: &str,
     ) -> Result<Option<String>, CacheError> {
         let conn = self.conn.lock().unwrap();
+
+        // First, try to get the "latest" dist-tag (for npm packages)
+        let dist_tag_result = conn.query_row(
+            r#"
+            SELECT dt.version FROM dist_tags dt
+            JOIN packages p ON dt.package_id = p.id
+            WHERE p.registry_type = ?1 AND p.package_name = ?2 AND dt.tag_name = 'latest'
+            "#,
+            (registry_type, package_name),
+            |row| row.get::<_, String>(0),
+        );
+
+        if let Ok(version) = dist_tag_result {
+            return Ok(Some(version));
+        }
+
+        // Fall back to the last inserted version (for registries without dist-tags)
         let result = conn.query_row(
             r#"
             SELECT v.version FROM versions v
@@ -313,6 +426,24 @@ impl VersionStorer for Cache {
         )?;
 
         Ok(())
+    }
+
+    fn get_dist_tag(
+        &self,
+        registry_type: &str,
+        package_name: &str,
+        tag_name: &str,
+    ) -> Result<Option<String>, CacheError> {
+        Cache::get_dist_tag(self, registry_type, package_name, tag_name)
+    }
+
+    fn save_dist_tags(
+        &self,
+        registry_type: &str,
+        package_name: &str,
+        dist_tags: &HashMap<String, String>,
+    ) -> Result<(), CacheError> {
+        Cache::save_dist_tags(self, registry_type, package_name, dist_tags)
     }
 }
 
@@ -561,5 +692,82 @@ mod tests {
         // Should be able to fetch again
         let can_fetch2 = cache.try_start_fetch("npm", "axios").unwrap();
         assert!(can_fetch2);
+    }
+
+    #[test]
+    fn save_and_get_dist_tags() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let cache = Cache::new(&db_path, 86400).unwrap();
+
+        let mut dist_tags = std::collections::HashMap::new();
+        dist_tags.insert("latest".to_string(), "4.17.21".to_string());
+        dist_tags.insert("beta".to_string(), "5.0.0-beta.1".to_string());
+
+        cache.save_dist_tags("npm", "lodash", &dist_tags).unwrap();
+
+        // Get specific dist-tag
+        let latest = cache.get_dist_tag("npm", "lodash", "latest").unwrap();
+        assert_eq!(latest, Some("4.17.21".to_string()));
+
+        let beta = cache.get_dist_tag("npm", "lodash", "beta").unwrap();
+        assert_eq!(beta, Some("5.0.0-beta.1".to_string()));
+
+        // Non-existent tag
+        let unknown = cache.get_dist_tag("npm", "lodash", "unknown").unwrap();
+        assert_eq!(unknown, None);
+
+        // Non-existent package
+        let no_pkg = cache.get_dist_tag("npm", "nonexistent", "latest").unwrap();
+        assert_eq!(no_pkg, None);
+    }
+
+    #[test]
+    fn get_latest_version_prefers_dist_tag_latest_over_last_inserted() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let cache = Cache::new(&db_path, 86400).unwrap();
+
+        // Insert versions in order: stable versions first, then pre-release
+        // This simulates npm's time-based ordering where pre-release comes last
+        let versions = vec![
+            "4.17.20".to_string(),
+            "4.17.21".to_string(),               // This is the stable latest
+            "0.0.0-insiders.abc123".to_string(), // Pre-release published after stable
+        ];
+        cache
+            .replace_versions("npm", "tailwindcss", versions)
+            .unwrap();
+
+        // Set dist-tags with latest pointing to stable version
+        let mut dist_tags = std::collections::HashMap::new();
+        dist_tags.insert("latest".to_string(), "4.17.21".to_string());
+        dist_tags.insert("insiders".to_string(), "0.0.0-insiders.abc123".to_string());
+        cache
+            .save_dist_tags("npm", "tailwindcss", &dist_tags)
+            .unwrap();
+
+        // get_latest_version should return dist-tags.latest, not the last inserted version
+        let latest = cache.get_latest_version("npm", "tailwindcss").unwrap();
+        assert_eq!(latest, Some("4.17.21".to_string()));
+    }
+
+    #[test]
+    fn get_latest_version_falls_back_to_last_inserted_when_no_dist_tag() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let cache = Cache::new(&db_path, 86400).unwrap();
+
+        // Insert versions without dist-tags (like GitHub Actions)
+        let versions = vec!["v3.0.0".to_string(), "v4.0.0".to_string()];
+        cache
+            .replace_versions("github_actions", "actions/checkout", versions)
+            .unwrap();
+
+        // No dist-tags set, should return last inserted version
+        let latest = cache
+            .get_latest_version("github_actions", "actions/checkout")
+            .unwrap();
+        assert_eq!(latest, Some("v4.0.0".to_string()));
     }
 }
