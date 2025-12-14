@@ -470,6 +470,19 @@ npm の範囲指定 (`^1.0.0`, `~1.0.0`) と GitHub Actions の部分マッチ�
 
 ### Phase 11: Cargo.tomlパーサー
 
+#### 11.0 Cargo.tomlバージョン仕様の調査
+
+- [ ] [RESEARCH] Cargoのバージョン要件仕様を調査
+  - 公式ドキュメント: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
+  - バージョン要件の種類を把握:
+    - Caret requirements: `^1.2.3` (デフォルト、npmと同様だが微妙に異なる)
+    - Tilde requirements: `~1.2.3`
+    - Wildcard requirements: `1.*`, `1.2.*`
+    - Comparison requirements: `>=1.2.0`, `>1`, `<2`, `=1.2.3`
+    - Multiple requirements: `>=1.2, <1.5`
+  - npmとの違いを明確化
+  - crates.io APIのレスポンス形式を確認
+
 #### 11.1 Cargo.tomlパーサーの実装
 
 - [ ] [RED] Cargo.tomlパーサーのテスト作成 (`src/parser/cargo_toml.rs`内の`#[cfg(test)]`)
@@ -531,6 +544,21 @@ npm の範囲指定 (`^1.0.0`, `~1.0.0`) と GitHub Actions の部分マッチ�
 ---
 
 ### Phase 13: go.modパーサー
+
+#### 13.0 Go Modulesバージョン仕様の調査
+
+- [ ] [RESEARCH] Go Modulesのバージョン仕様を調査
+  - 公式ドキュメント: https://go.dev/ref/mod
+  - バージョン形式を把握:
+    - Semantic versioning: `v1.2.3`
+    - Pre-release versions: `v1.2.3-beta.1`
+    - `+incompatible` suffix: `v2.0.0+incompatible` (go.mod未対応のv2+モジュール)
+    - Pseudo-versions: `v0.0.0-20210101000000-abcdef123456`
+  - go.modのrequireディレクティブ形式:
+    - 単一: `require example.com/foo v1.2.3`
+    - ブロック: `require ( ... )`
+    - indirect依存: `// indirect` コメント
+  - Go proxy APIのレスポンス形式を確認 (`/@v/list`, `/@latest`)
 
 #### 13.1 go.modパーサーの実装
 
