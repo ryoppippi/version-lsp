@@ -6,7 +6,7 @@ use crate::parser::types::RegistryType;
 use crate::version::error::RegistryError;
 use crate::version::registry::Registry;
 use crate::version::types::PackageVersions;
-use semver::Version;
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tracing::warn;
 
@@ -17,6 +17,11 @@ const DEFAULT_BASE_URL: &str = "https://registry.npmjs.org";
 #[derive(Debug, Deserialize)]
 struct NpmPackageResponse {
     versions: HashMap<String, serde_json::Value>,
+    #[serde(rename = "dist-tags", default)]
+    dist_tags: HashMap<String, String>,
+    /// Version publish timestamps (version -> ISO 8601 timestamp)
+    #[serde(default)]
+    time: HashMap<String, String>,
 }
 
 /// Registry implementation for npm registry API
@@ -88,18 +93,29 @@ impl Registry for NpmRegistry {
             RegistryError::InvalidResponse(e.to_string())
         })?;
 
-        // Sort versions by semver (lowest first, highest last)
-        let mut versions: Vec<(String, Version)> = package_info
+        // Sort versions by publish date (oldest first, newest last)
+        // Versions without timestamps are placed at the beginning
+        let mut versions: Vec<(String, Option<DateTime<Utc>>)> = package_info
             .versions
             .into_keys()
-            .filter_map(|v| Version::parse(&v).ok().map(|parsed| (v, parsed)))
+            .map(|v| {
+                let timestamp = package_info
+                    .time
+                    .get(&v)
+                    .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+                    .map(|dt| dt.with_timezone(&Utc));
+                (v, timestamp)
+            })
             .collect();
 
         versions.sort_by(|(_, a), (_, b)| a.cmp(b));
 
         let versions: Vec<String> = versions.into_iter().map(|(v, _)| v).collect();
 
-        Ok(PackageVersions::new(versions))
+        Ok(PackageVersions::with_dist_tags(
+            versions,
+            package_info.dist_tags,
+        ))
     }
 }
 
@@ -109,7 +125,7 @@ mod tests {
     use mockito::Server;
 
     #[tokio::test]
-    async fn fetch_all_versions_returns_versions_sorted_by_semver() {
+    async fn fetch_all_versions_returns_versions_sorted_by_time() {
         let mut server = Server::new_async().await;
 
         let mock = server
@@ -123,6 +139,11 @@ mod tests {
                         "4.17.21": {},
                         "4.17.19": {},
                         "4.17.20": {}
+                    },
+                    "time": {
+                        "4.17.19": "2020-07-08T17:14:40.866Z",
+                        "4.17.20": "2020-08-13T16:53:54.152Z",
+                        "4.17.21": "2021-02-20T15:42:16.891Z"
                     }
                 }"#,
             )
@@ -133,7 +154,7 @@ mod tests {
         let result = registry.fetch_all_versions("lodash").await.unwrap();
 
         mock.assert_async().await;
-        // Versions should be sorted by semver (lowest first, highest last)
+        // Versions should be sorted by publish date (oldest first, newest last)
         assert_eq!(
             result.versions,
             vec![
@@ -178,6 +199,10 @@ mod tests {
                     "versions": {
                         "20.0.0": {},
                         "18.0.0": {}
+                    },
+                    "time": {
+                        "18.0.0": "2022-06-01T00:00:00.000Z",
+                        "20.0.0": "2023-04-01T00:00:00.000Z"
                     }
                 }"#,
             )
@@ -188,7 +213,7 @@ mod tests {
         let result = registry.fetch_all_versions("@types/node").await.unwrap();
 
         mock.assert_async().await;
-        // Versions should be sorted by semver
+        // Versions should be sorted by publish date
         assert_eq!(
             result.versions,
             vec!["18.0.0".to_string(), "20.0.0".to_string()]
@@ -217,5 +242,92 @@ mod tests {
 
         mock.assert_async().await;
         assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_all_versions_returns_versions_sorted_by_publish_date() {
+        let mut server = Server::new_async().await;
+
+        // Intentionally set time field so that publish date order differs from semver order
+        // semver order: 1.0.0 < 1.5.0 < 2.0.0
+        // publish date order: 1.0.0 (Jan) < 2.0.0 (Jun) < 1.5.0 (Dec)
+        let mock = server
+            .mock("GET", "/test-pkg")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "name": "test-pkg",
+                    "versions": {
+                        "1.0.0": {},
+                        "2.0.0": {},
+                        "1.5.0": {}
+                    },
+                    "time": {
+                        "1.0.0": "2020-01-01T00:00:00.000Z",
+                        "2.0.0": "2020-06-01T00:00:00.000Z",
+                        "1.5.0": "2020-12-01T00:00:00.000Z"
+                    }
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let registry = NpmRegistry::new(&server.url());
+        let result = registry.fetch_all_versions("test-pkg").await.unwrap();
+
+        mock.assert_async().await;
+        // Versions should be sorted by publish date (oldest first, newest last)
+        assert_eq!(
+            result.versions,
+            vec![
+                "1.0.0".to_string(),
+                "2.0.0".to_string(),
+                "1.5.0".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_all_versions_returns_dist_tags() {
+        let mut server = Server::new_async().await;
+
+        let mock = server
+            .mock("GET", "/lodash")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "name": "lodash",
+                    "versions": {
+                        "4.17.21": {},
+                        "4.17.20": {},
+                        "5.0.0-beta.1": {}
+                    },
+                    "dist-tags": {
+                        "latest": "4.17.21",
+                        "beta": "5.0.0-beta.1"
+                    },
+                    "time": {
+                        "4.17.20": "2020-08-13T16:53:54.152Z",
+                        "4.17.21": "2021-02-20T15:42:16.891Z",
+                        "5.0.0-beta.1": "2021-06-01T00:00:00.000Z"
+                    }
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let registry = NpmRegistry::new(&server.url());
+        let result = registry.fetch_all_versions("lodash").await.unwrap();
+
+        mock.assert_async().await;
+
+        // Verify dist-tags were extracted
+        assert_eq!(result.dist_tags.get("latest"), Some(&"4.17.21".to_string()));
+        assert_eq!(
+            result.dist_tags.get("beta"),
+            Some(&"5.0.0-beta.1".to_string())
+        );
     }
 }
