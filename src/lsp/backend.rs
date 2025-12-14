@@ -10,13 +10,15 @@ use crate::config::{DEFAULT_REFRESH_INTERVAL_MS, data_dir, db_path};
 use crate::lsp::diagnostics::generate_diagnostics;
 use crate::lsp::refresh::{fetch_missing_packages, refresh_packages};
 use crate::parser::github_actions::GitHubActionsParser;
+use crate::parser::package_json::PackageJsonParser;
 use crate::parser::traits::Parser;
 use crate::parser::types::{RegistryType, detect_parser_type};
 use crate::version::cache::Cache;
 use crate::version::checker::VersionStorer;
 use crate::version::matcher::VersionMatcher;
-use crate::version::matchers::GitHubActionsMatcher;
+use crate::version::matchers::{GitHubActionsMatcher, NpmVersionMatcher};
 use crate::version::registries::github::GitHubRegistry;
+use crate::version::registries::npm::NpmRegistry;
 use crate::version::registry::Registry;
 
 pub struct Backend<S: VersionStorer> {
@@ -87,15 +89,14 @@ impl<S: VersionStorer> Backend<S> {
             RegistryType::GitHubActions,
             Arc::new(GitHubActionsParser::new()),
         );
+        parsers.insert(RegistryType::Npm, Arc::new(PackageJsonParser::new()));
         parsers
     }
 
     fn initialize_matchers() -> HashMap<RegistryType, Arc<dyn VersionMatcher>> {
         let mut matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>> = HashMap::new();
-        matchers.insert(
-            RegistryType::GitHubActions,
-            Arc::new(GitHubActionsMatcher),
-        );
+        matchers.insert(RegistryType::GitHubActions, Arc::new(GitHubActionsMatcher));
+        matchers.insert(RegistryType::Npm, Arc::new(NpmVersionMatcher));
         matchers
     }
 
@@ -105,6 +106,7 @@ impl<S: VersionStorer> Backend<S> {
             RegistryType::GitHubActions,
             Arc::new(GitHubRegistry::default()),
         );
+        registries.insert(RegistryType::Npm, Arc::new(NpmRegistry::default()));
         registries
     }
 

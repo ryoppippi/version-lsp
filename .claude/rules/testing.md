@@ -28,6 +28,27 @@ assert_eq!(capabilities.open_close, Some(true));
 
 **If refactoring breaks your tests, you're testing implementation details.**
 
+## Self-Review Checklist
+
+After implementing tests, MUST self-review each test against this checklist:
+
+1. **Behavior test?** - If this test fails, can I explain what broke for the user?
+   - ❌ `assert_eq!(config.registry_type, RegistryType::Npm)` - Configuration value, not behavior
+   - ✅ `assert_eq!(diagnostics[0].message, "Update available: 1.0.0 -> 2.0.0")` - User-visible behavior
+
+2. **Not a tautology?** - Does this test verify something meaningful?
+   - ❌ Testing that a getter returns what was set
+   - ✅ Testing that input A produces output B
+
+3. **No redundant helpers?** - Are there unnecessary abstractions?
+   - ❌ `fn matcher() -> Matcher { Matcher }` then `matcher().method()`
+   - ✅ `Matcher.method()` directly
+
+4. **Following existing patterns blindly?** - Did I copy from elsewhere without evaluating?
+   - Always evaluate each test individually against these rules
+
+**If any check fails, fix the test before proceeding.**
+
 ## Parameterized Tests
 
 - Use `rstest` crate for parameterized tests

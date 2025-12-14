@@ -27,12 +27,14 @@ use version_lsp::version::types::PackageVersions;
 
 /// Mock registry for testing
 struct MockRegistry {
+    registry_type: RegistryType,
     versions: HashMap<String, Vec<String>>,
 }
 
 impl MockRegistry {
-    fn new() -> Self {
+    fn new(registry_type: RegistryType) -> Self {
         Self {
+            registry_type,
             versions: HashMap::new(),
         }
     }
@@ -49,7 +51,7 @@ impl MockRegistry {
 #[async_trait]
 impl Registry for MockRegistry {
     fn registry_type(&self) -> RegistryType {
-        RegistryType::GitHubActions
+        self.registry_type
     }
 
     async fn fetch_all_versions(
@@ -63,7 +65,7 @@ impl Registry for MockRegistry {
     }
 }
 
-fn create_test_cache(versions: &[(&str, Vec<&str>)]) -> (TempDir, Arc<Cache>) {
+fn create_test_cache(registry_type: &str, versions: &[(&str, Vec<&str>)]) -> (TempDir, Arc<Cache>) {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
     let cache = Cache::new(&db_path, 86400000).unwrap();
@@ -71,7 +73,7 @@ fn create_test_cache(versions: &[(&str, Vec<&str>)]) -> (TempDir, Arc<Cache>) {
     for (package_name, package_versions) in versions {
         cache
             .replace_versions(
-                "github_actions",
+                registry_type,
                 package_name,
                 package_versions.iter().map(|v| v.to_string()).collect(),
             )
@@ -166,12 +168,14 @@ async fn wait_for_notification(rx: &mut mpsc::Receiver<Request>, method: &str) -
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_did_open_publishes_outdated_version_warning() {
     // 1. Setup real Cache with test data
-    let (_temp_dir, cache) =
-        create_test_cache(&[("actions/checkout", vec!["4.0.0", "3.0.0", "2.0.0"])]);
+    let (_temp_dir, cache) = create_test_cache(
+        "github_actions",
+        &[("actions/checkout", vec!["4.0.0", "3.0.0", "2.0.0"])],
+    );
 
     // 2. Setup mock Registry
-    let registry =
-        MockRegistry::new().with_versions("actions/checkout", vec!["4.0.0", "3.0.0", "2.0.0"]);
+    let registry = MockRegistry::new(RegistryType::GitHubActions)
+        .with_versions("actions/checkout", vec!["4.0.0", "3.0.0", "2.0.0"]);
 
     let registries: HashMap<RegistryType, Arc<dyn Registry>> =
         HashMap::from([(RegistryType::GitHubActions, Arc::new(registry) as _)]);
@@ -234,10 +238,14 @@ jobs:
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_did_open_no_diagnostics_for_latest_version() {
     // 1. Setup real Cache with test data
-    let (_temp_dir, cache) = create_test_cache(&[("actions/checkout", vec!["4.0.0", "3.0.0"])]);
+    let (_temp_dir, cache) = create_test_cache(
+        "github_actions",
+        &[("actions/checkout", vec!["4.0.0", "3.0.0"])],
+    );
 
     // 2. Setup mock Registry
-    let registry = MockRegistry::new().with_versions("actions/checkout", vec!["4.0.0", "3.0.0"]);
+    let registry = MockRegistry::new(RegistryType::GitHubActions)
+        .with_versions("actions/checkout", vec!["4.0.0", "3.0.0"]);
 
     let registries: HashMap<RegistryType, Arc<dyn Registry>> =
         HashMap::from([(RegistryType::GitHubActions, Arc::new(registry) as _)]);
@@ -288,10 +296,14 @@ jobs:
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_did_open_publishes_error_for_nonexistent_version() {
     // 1. Setup real Cache with test data
-    let (_temp_dir, cache) = create_test_cache(&[("actions/checkout", vec!["4.0.0", "3.0.0"])]);
+    let (_temp_dir, cache) = create_test_cache(
+        "github_actions",
+        &[("actions/checkout", vec!["4.0.0", "3.0.0"])],
+    );
 
     // 2. Setup mock Registry
-    let registry = MockRegistry::new().with_versions("actions/checkout", vec!["4.0.0", "3.0.0"]);
+    let registry = MockRegistry::new(RegistryType::GitHubActions)
+        .with_versions("actions/checkout", vec!["4.0.0", "3.0.0"]);
 
     let registries: HashMap<RegistryType, Arc<dyn Registry>> =
         HashMap::from([(RegistryType::GitHubActions, Arc::new(registry) as _)]);
@@ -350,12 +362,14 @@ jobs:
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_did_change_publishes_diagnostics_on_version_update() {
     // 1. Setup real Cache with test data
-    let (_temp_dir, cache) =
-        create_test_cache(&[("actions/checkout", vec!["4.0.0", "3.0.0", "2.0.0"])]);
+    let (_temp_dir, cache) = create_test_cache(
+        "github_actions",
+        &[("actions/checkout", vec!["4.0.0", "3.0.0", "2.0.0"])],
+    );
 
     // 2. Setup mock Registry
-    let registry =
-        MockRegistry::new().with_versions("actions/checkout", vec!["4.0.0", "3.0.0", "2.0.0"]);
+    let registry = MockRegistry::new(RegistryType::GitHubActions)
+        .with_versions("actions/checkout", vec!["4.0.0", "3.0.0", "2.0.0"]);
 
     let registries: HashMap<RegistryType, Arc<dyn Registry>> =
         HashMap::from([(RegistryType::GitHubActions, Arc::new(registry) as _)]);
@@ -434,4 +448,231 @@ jobs:
         params.diagnostics[0].message,
         "Update available: 3.0.0 -> 4.0.0"
     );
+}
+
+// ============================================================================
+// package.json E2E tests
+// ============================================================================
+
+#[tokio::test(flavor = "multi_thread")]
+async fn e2e_package_json_publishes_outdated_version_warning() {
+    // 1. Setup real Cache with test data
+    let (_temp_dir, cache) =
+        create_test_cache("npm", &[("lodash", vec!["4.17.21", "4.17.20", "4.17.19"])]);
+
+    // 2. Setup mock Registry
+    let registry = MockRegistry::new(RegistryType::Npm)
+        .with_versions("lodash", vec!["4.17.21", "4.17.20", "4.17.19"]);
+
+    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
+        HashMap::from([(RegistryType::Npm, Arc::new(registry) as _)]);
+
+    // 3. Create LspService
+    let (mut service, socket) =
+        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+
+    let mut notification_rx = spawn_notification_collector(socket);
+
+    // 4. Initialize
+    service.call(create_initialize_request(1)).await.unwrap();
+    service
+        .call(create_initialized_notification())
+        .await
+        .unwrap();
+
+    // 5. didOpen with outdated version
+    let package_json = r#"{
+  "name": "test-project",
+  "dependencies": {
+    "lodash": "4.17.20"
+  }
+}"#;
+
+    service
+        .call(create_did_open_notification(
+            "file:///test/package.json",
+            package_json,
+        ))
+        .await
+        .unwrap();
+
+    // 6. Receive publishDiagnostics notification
+    let notification =
+        wait_for_notification(&mut notification_rx, "textDocument/publishDiagnostics")
+            .await
+            .expect("Expected publishDiagnostics notification");
+
+    let params: PublishDiagnosticsParams =
+        serde_json::from_value(notification.params().unwrap().clone()).unwrap();
+    assert_eq!(params.diagnostics.len(), 1);
+    assert_eq!(
+        params.diagnostics[0].severity,
+        Some(DiagnosticSeverity::WARNING)
+    );
+    assert_eq!(
+        params.diagnostics[0].message,
+        "Update available: 4.17.20 -> 4.17.21"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn e2e_package_json_no_diagnostics_for_latest_version() {
+    // 1. Setup real Cache with test data
+    let (_temp_dir, cache) = create_test_cache("npm", &[("lodash", vec!["4.17.21", "4.17.20"])]);
+
+    // 2. Setup mock Registry
+    let registry =
+        MockRegistry::new(RegistryType::Npm).with_versions("lodash", vec!["4.17.21", "4.17.20"]);
+
+    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
+        HashMap::from([(RegistryType::Npm, Arc::new(registry) as _)]);
+
+    // 3. Create LspService
+    let (mut service, socket) =
+        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+
+    let mut notification_rx = spawn_notification_collector(socket);
+
+    // 4. Initialize
+    service.call(create_initialize_request(1)).await.unwrap();
+    service
+        .call(create_initialized_notification())
+        .await
+        .unwrap();
+
+    // 5. didOpen with latest version
+    let package_json = r#"{
+  "name": "test-project",
+  "dependencies": {
+    "lodash": "4.17.21"
+  }
+}"#;
+
+    service
+        .call(create_did_open_notification(
+            "file:///test/package.json",
+            package_json,
+        ))
+        .await
+        .unwrap();
+
+    // 6. Receive publishDiagnostics notification - should be empty
+    let notification =
+        wait_for_notification(&mut notification_rx, "textDocument/publishDiagnostics")
+            .await
+            .expect("Expected publishDiagnostics notification");
+    let params: PublishDiagnosticsParams =
+        serde_json::from_value(notification.params().unwrap().clone()).unwrap();
+    assert!(params.diagnostics.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn e2e_package_json_publishes_error_for_nonexistent_version() {
+    // 1. Setup real Cache with test data
+    let (_temp_dir, cache) = create_test_cache("npm", &[("lodash", vec!["4.17.21", "4.17.20"])]);
+
+    // 2. Setup mock Registry
+    let registry =
+        MockRegistry::new(RegistryType::Npm).with_versions("lodash", vec!["4.17.21", "4.17.20"]);
+
+    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
+        HashMap::from([(RegistryType::Npm, Arc::new(registry) as _)]);
+
+    // 3. Create LspService
+    let (mut service, socket) =
+        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+
+    let mut notification_rx = spawn_notification_collector(socket);
+
+    // 4. Initialize
+    service.call(create_initialize_request(1)).await.unwrap();
+    service
+        .call(create_initialized_notification())
+        .await
+        .unwrap();
+
+    // 5. didOpen with nonexistent version
+    let package_json = r#"{
+  "name": "test-project",
+  "dependencies": {
+    "lodash": "999.0.0"
+  }
+}"#;
+
+    service
+        .call(create_did_open_notification(
+            "file:///test/package.json",
+            package_json,
+        ))
+        .await
+        .unwrap();
+
+    // 6. Receive publishDiagnostics notification - should have ERROR diagnostic
+    let notification =
+        wait_for_notification(&mut notification_rx, "textDocument/publishDiagnostics")
+            .await
+            .expect("Expected publishDiagnostics notification");
+    let params: PublishDiagnosticsParams =
+        serde_json::from_value(notification.params().unwrap().clone()).unwrap();
+    assert_eq!(params.diagnostics.len(), 1);
+    assert_eq!(
+        params.diagnostics[0].severity,
+        Some(DiagnosticSeverity::ERROR)
+    );
+    assert_eq!(
+        params.diagnostics[0].message,
+        "Version 999.0.0 not found in registry"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn e2e_package_json_caret_range_is_latest_when_satisfied() {
+    // 1. Setup real Cache with test data (caret range ^4.17.0 satisfies 4.17.21)
+    let (_temp_dir, cache) =
+        create_test_cache("npm", &[("lodash", vec!["4.17.21", "4.17.20", "4.17.0"])]);
+
+    // 2. Setup mock Registry
+    let registry = MockRegistry::new(RegistryType::Npm)
+        .with_versions("lodash", vec!["4.17.21", "4.17.20", "4.17.0"]);
+
+    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
+        HashMap::from([(RegistryType::Npm, Arc::new(registry) as _)]);
+
+    // 3. Create LspService
+    let (mut service, socket) =
+        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+
+    let mut notification_rx = spawn_notification_collector(socket);
+
+    // 4. Initialize
+    service.call(create_initialize_request(1)).await.unwrap();
+    service
+        .call(create_initialized_notification())
+        .await
+        .unwrap();
+
+    // 5. didOpen with caret range that includes latest
+    let package_json = r#"{
+  "name": "test-project",
+  "dependencies": {
+    "lodash": "^4.17.0"
+  }
+}"#;
+
+    service
+        .call(create_did_open_notification(
+            "file:///test/package.json",
+            package_json,
+        ))
+        .await
+        .unwrap();
+
+    // 6. Receive publishDiagnostics notification - should be empty (latest 4.17.21 satisfies ^4.17.0)
+    let notification =
+        wait_for_notification(&mut notification_rx, "textDocument/publishDiagnostics")
+            .await
+            .expect("Expected publishDiagnostics notification");
+    let params: PublishDiagnosticsParams =
+        serde_json::from_value(notification.params().unwrap().clone()).unwrap();
+    assert!(params.diagnostics.is_empty());
 }

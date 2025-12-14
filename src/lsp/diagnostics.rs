@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use crate::parser::traits::Parser;
 use crate::parser::types::PackageInfo;
 use crate::version::checker::{
-    compare_version, VersionCompareResult, VersionStatus, VersionStorer,
+    VersionCompareResult, VersionStatus, VersionStorer, compare_version,
 };
 use crate::version::matcher::VersionMatcher;
 

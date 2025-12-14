@@ -437,32 +437,32 @@ npm の範囲指定 (`^1.0.0`, `~1.0.0`) と GitHub Actions の部分マッチ�
 
 #### 10.6.1 NpmVersionMatcher 実装
 
-- [ ] [RED] NpmVersionMatcher のテスト作成 (`src/version/matchers/npm.rs`内の`#[cfg(test)]`)
+- [x] [RED] NpmVersionMatcher のテスト作成 (`src/version/matchers/npm.rs`内の`#[cfg(test)]`)
   - 範囲指定のテスト (`^1.0.0`, `~1.0.0`, `>=1.0.0`, etc.)
   - 完全一致のテスト (`1.0.0`)
   - 無効な範囲指定のテスト
 
-- [ ] [GREEN] NpmVersionMatcher の実装 (`src/version/matchers/npm.rs`)
+- [x] [GREEN] NpmVersionMatcher の実装 (`src/version/matchers/npm.rs`)
   - 範囲指定のパース (`^`, `~`, `>=`, `>`, `<=`, `<`, `x`, `*`)
   - 範囲内で最新バージョンを見つける
   - `VersionMatcher` トレイトを実装
 
-- [ ] [REFACTOR] エッジケースの対応
+- [x] [REFACTOR] エッジケースの対応
   - プレリリースバージョンの処理
   - ワイルドカード (`x`, `*`) の処理
 
 #### 10.6.2 package.json統合とE2Eテスト
 
-- [ ] [RED] E2Eテスト作成 (`tests/lsp_e2e_test.rs`)
+- [x] [RED] E2Eテスト作成 (`tests/lsp_e2e_test.rs`)
   - package.jsonのdidOpen時にdiagnosticsが発行されることを確認
   - 古いバージョン、存在しないバージョンのケース
 
-- [ ] [GREEN] Backend統合
+- [x] [GREEN] Backend統合
   - `initialize_parsers()`に`PackageJsonParser`を追加
   - `initialize_registries()`に`NpmRegistry`を追加
   - `initialize_matchers()`に`NpmVersionMatcher`を追加
 
-- [ ] [REFACTOR] 動作確認
+- [x] [REFACTOR] 動作確認
   - package.json に対する動作確認
   - 全テスト通過確認
 
