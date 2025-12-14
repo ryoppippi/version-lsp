@@ -18,13 +18,15 @@ pub async fn refresh_packages<S: VersionStorer>(
     packages: Vec<PackageId>,
 ) {
     for package in packages {
+        let registry_type_str = package.registry_type.as_str();
+
         // Try to acquire fetch lock (returns false if another process is fetching)
         let can_fetch = storer
-            .try_start_fetch(&package.registry_type, &package.package_name)
+            .try_start_fetch(package.registry_type, &package.package_name)
             .inspect_err(|e| {
                 error!(
                     "Failed to start fetch for {}/{}: {}",
-                    package.registry_type, package.package_name, e
+                    registry_type_str, package.package_name, e
                 )
             })
             .unwrap_or(false);
@@ -32,7 +34,7 @@ pub async fn refresh_packages<S: VersionStorer>(
         if !can_fetch {
             info!(
                 "Skipping {}/{}: already being fetched by another process",
-                package.registry_type, package.package_name
+                registry_type_str, package.package_name
             );
             continue;
         }
@@ -41,29 +43,35 @@ pub async fn refresh_packages<S: VersionStorer>(
 
         match result {
             Ok(pkg_versions) => {
+                let version_count = pkg_versions.versions.len();
                 let save_result = storer.replace_versions(
-                    &package.registry_type,
+                    package.registry_type,
                     &package.package_name,
                     pkg_versions.versions,
                 );
                 if let Err(e) = save_result {
                     error!(
                         "Failed to save versions for {}/{}: {}",
-                        package.registry_type, package.package_name, e
+                        registry_type_str, package.package_name, e
+                    );
+                } else {
+                    info!(
+                        "Saved {} versions for {}/{}",
+                        version_count, registry_type_str, package.package_name
                     );
                 }
 
                 // Save dist tags if available
                 if !pkg_versions.dist_tags.is_empty() {
                     let dist_tags_result = storer.save_dist_tags(
-                        &package.registry_type,
+                        package.registry_type,
                         &package.package_name,
                         &pkg_versions.dist_tags,
                     );
                     if let Err(e) = dist_tags_result {
                         error!(
                             "Failed to save dist tags for {}/{}: {}",
-                            package.registry_type, package.package_name, e
+                            registry_type_str, package.package_name, e
                         );
                     }
                 }
@@ -71,18 +79,18 @@ pub async fn refresh_packages<S: VersionStorer>(
             Err(e) => {
                 error!(
                     "Failed to fetch versions for {}/{}: {}",
-                    package.registry_type, package.package_name, e
+                    registry_type_str, package.package_name, e
                 );
             }
         }
 
         // Release fetch lock (always call regardless of success/failure)
         let _ = storer
-            .finish_fetch(&package.registry_type, &package.package_name)
+            .finish_fetch(package.registry_type, &package.package_name)
             .inspect_err(|e| {
                 error!(
                     "Failed to finish fetch for {}/{}: {}",
-                    package.registry_type, package.package_name, e
+                    registry_type_str, package.package_name, e
                 )
             });
     }
@@ -101,11 +109,11 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
     let mut fetched = Vec::new();
 
     for package in packages {
-        let registry_type = package.registry_type.as_str();
+        let registry_type_str = package.registry_type.as_str();
 
         // Check if package is in cache
         let in_cache = storer
-            .get_latest_version(registry_type, &package.name)
+            .get_latest_version(package.registry_type, &package.name)
             .ok()
             .flatten()
             .is_some();
@@ -116,11 +124,11 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
 
         // Try to acquire fetch lock (returns false if another process is fetching)
         let can_fetch = storer
-            .try_start_fetch(registry_type, &package.name)
+            .try_start_fetch(package.registry_type, &package.name)
             .inspect_err(|e| {
                 error!(
                     "Failed to start fetch for {}/{}: {}",
-                    registry_type, package.name, e
+                    registry_type_str, package.name, e
                 )
             })
             .unwrap_or(false);
@@ -128,42 +136,54 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
         if !can_fetch {
             info!(
                 "Skipping {}/{}: already being fetched by another process",
-                registry_type, package.name
+                registry_type_str, package.name
             );
             continue;
         }
 
         info!(
             "Fetching missing package {}/{} from registry",
-            registry_type, package.name
+            registry_type_str, package.name
         );
 
         let result = registry.fetch_all_versions(&package.name).await;
 
         match result {
             Ok(pkg_versions) => {
-                let save_result =
-                    storer.replace_versions(registry_type, &package.name, pkg_versions.versions);
+                let version_count = pkg_versions.versions.len();
+                let save_result = storer.replace_versions(
+                    package.registry_type,
+                    &package.name,
+                    pkg_versions.versions,
+                );
 
                 if save_result
                     .inspect_err(|e| {
                         error!(
                             "Failed to save versions for {}/{}: {}",
-                            registry_type, package.name, e
+                            registry_type_str, package.name, e
                         );
                     })
                     .is_ok()
                 {
+                    info!(
+                        "Saved {} versions for {}/{}",
+                        version_count, registry_type_str, package.name
+                    );
                     fetched.push(package.name.clone());
 
                     // Save dist tags if available
                     if !pkg_versions.dist_tags.is_empty() {
                         let _ = storer
-                            .save_dist_tags(registry_type, &package.name, &pkg_versions.dist_tags)
+                            .save_dist_tags(
+                                package.registry_type,
+                                &package.name,
+                                &pkg_versions.dist_tags,
+                            )
                             .inspect_err(|e| {
                                 error!(
                                     "Failed to save dist tags for {}/{}: {}",
-                                    registry_type, package.name, e
+                                    registry_type_str, package.name, e
                                 );
                             });
                     }
@@ -172,18 +192,18 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
             Err(e) => {
                 error!(
                     "Failed to fetch versions for {}/{}: {}",
-                    registry_type, package.name, e
+                    registry_type_str, package.name, e
                 );
             }
         }
 
         // Release fetch lock (always call regardless of success/failure)
         let _ = storer
-            .finish_fetch(registry_type, &package.name)
+            .finish_fetch(package.registry_type, &package.name)
             .inspect_err(|e| {
                 error!(
                     "Failed to finish fetch for {}/{}: {}",
-                    registry_type, package.name, e
+                    registry_type_str, package.name, e
                 )
             });
     }
@@ -241,7 +261,7 @@ mod tests {
             });
 
         let packages = vec![PackageId {
-            registry_type: "github_actions".to_string(),
+            registry_type: RegistryType::GitHubActions,
             package_name: "actions/checkout".to_string(),
         }];
 
@@ -284,11 +304,11 @@ mod tests {
 
         let packages = vec![
             PackageId {
-                registry_type: "github_actions".to_string(),
+                registry_type: RegistryType::GitHubActions,
                 package_name: "failing/repo".to_string(),
             },
             PackageId {
-                registry_type: "github_actions".to_string(),
+                registry_type: RegistryType::GitHubActions,
                 package_name: "actions/checkout".to_string(),
             },
         ];
@@ -364,7 +384,7 @@ mod tests {
         // Pre-populate cache
         cache
             .replace_versions(
-                "github_actions",
+                RegistryType::GitHubActions,
                 "actions/checkout",
                 vec!["v4.0.0".to_string()],
             )
@@ -392,7 +412,7 @@ mod tests {
         // Pre-populate cache with one package
         cache
             .replace_versions(
-                "github_actions",
+                RegistryType::GitHubActions,
                 "actions/checkout",
                 vec!["v4.0.0".to_string()],
             )

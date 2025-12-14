@@ -65,7 +65,10 @@ impl Registry for MockRegistry {
     }
 }
 
-fn create_test_cache(registry_type: &str, versions: &[(&str, Vec<&str>)]) -> (TempDir, Arc<Cache>) {
+fn create_test_cache(
+    registry_type: RegistryType,
+    versions: &[(&str, Vec<&str>)],
+) -> (TempDir, Arc<Cache>) {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
     let cache = Cache::new(&db_path, 86400000).unwrap();
@@ -169,7 +172,7 @@ async fn wait_for_notification(rx: &mut mpsc::Receiver<Request>, method: &str) -
 async fn e2e_did_open_publishes_outdated_version_warning() {
     // 1. Setup real Cache with test data (oldest first, newest last)
     let (_temp_dir, cache) = create_test_cache(
-        "github_actions",
+        RegistryType::GitHubActions,
         &[("actions/checkout", vec!["2.0.0", "3.0.0", "4.0.0"])],
     );
 
@@ -239,7 +242,7 @@ jobs:
 async fn e2e_did_open_no_diagnostics_for_latest_version() {
     // 1. Setup real Cache with test data (oldest first, newest last)
     let (_temp_dir, cache) = create_test_cache(
-        "github_actions",
+        RegistryType::GitHubActions,
         &[("actions/checkout", vec!["3.0.0", "4.0.0"])],
     );
 
@@ -297,7 +300,7 @@ jobs:
 async fn e2e_did_open_publishes_error_for_nonexistent_version() {
     // 1. Setup real Cache with test data (oldest first, newest last)
     let (_temp_dir, cache) = create_test_cache(
-        "github_actions",
+        RegistryType::GitHubActions,
         &[("actions/checkout", vec!["3.0.0", "4.0.0"])],
     );
 
@@ -363,7 +366,7 @@ jobs:
 async fn e2e_did_change_publishes_diagnostics_on_version_update() {
     // 1. Setup real Cache with test data (oldest first, newest last)
     let (_temp_dir, cache) = create_test_cache(
-        "github_actions",
+        RegistryType::GitHubActions,
         &[("actions/checkout", vec!["2.0.0", "3.0.0", "4.0.0"])],
     );
 
@@ -457,8 +460,10 @@ jobs:
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_package_json_publishes_outdated_version_warning() {
     // 1. Setup real Cache with test data (oldest first, newest last)
-    let (_temp_dir, cache) =
-        create_test_cache("npm", &[("lodash", vec!["4.17.19", "4.17.20", "4.17.21"])]);
+    let (_temp_dir, cache) = create_test_cache(
+        RegistryType::Npm,
+        &[("lodash", vec!["4.17.19", "4.17.20", "4.17.21"])],
+    );
 
     // 2. Setup mock Registry
     let registry = MockRegistry::new(RegistryType::Npm)
@@ -518,7 +523,8 @@ async fn e2e_package_json_publishes_outdated_version_warning() {
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_package_json_no_diagnostics_for_latest_version() {
     // 1. Setup real Cache with test data (oldest first, newest last)
-    let (_temp_dir, cache) = create_test_cache("npm", &[("lodash", vec!["4.17.20", "4.17.21"])]);
+    let (_temp_dir, cache) =
+        create_test_cache(RegistryType::Npm, &[("lodash", vec!["4.17.20", "4.17.21"])]);
 
     // 2. Setup mock Registry
     let registry =
@@ -569,7 +575,8 @@ async fn e2e_package_json_no_diagnostics_for_latest_version() {
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_package_json_publishes_error_for_nonexistent_version() {
     // 1. Setup real Cache with test data (oldest first, newest last)
-    let (_temp_dir, cache) = create_test_cache("npm", &[("lodash", vec!["4.17.20", "4.17.21"])]);
+    let (_temp_dir, cache) =
+        create_test_cache(RegistryType::Npm, &[("lodash", vec!["4.17.20", "4.17.21"])]);
 
     // 2. Setup mock Registry
     let registry =
@@ -629,8 +636,10 @@ async fn e2e_package_json_publishes_error_for_nonexistent_version() {
 async fn e2e_package_json_caret_range_is_latest_when_satisfied() {
     // 1. Setup real Cache with test data (oldest first, newest last)
     // caret range ^4.17.0 satisfies latest 4.17.21
-    let (_temp_dir, cache) =
-        create_test_cache("npm", &[("lodash", vec!["4.17.0", "4.17.20", "4.17.21"])]);
+    let (_temp_dir, cache) = create_test_cache(
+        RegistryType::Npm,
+        &[("lodash", vec!["4.17.0", "4.17.20", "4.17.21"])],
+    );
 
     // 2. Setup mock Registry
     let registry = MockRegistry::new(RegistryType::Npm)

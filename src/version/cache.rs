@@ -5,12 +5,13 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tracing::{debug, info};
 
+use crate::parser::types::RegistryType;
 use crate::version::checker::VersionStorer;
 use crate::version::error::CacheError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageId {
-    pub registry_type: String,
+    pub registry_type: RegistryType,
     pub package_name: String,
 }
 
@@ -225,9 +226,10 @@ impl Cache {
 impl VersionStorer for Cache {
     fn get_latest_version(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
     ) -> Result<Option<String>, CacheError> {
+        let registry_type = registry_type.as_str();
         let conn = self.conn.lock().unwrap();
 
         // First, try to get the "latest" dist-tag (for npm packages)
@@ -267,18 +269,19 @@ impl VersionStorer for Cache {
 
     fn get_versions(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
     ) -> Result<Vec<String>, CacheError> {
-        Cache::get_versions(self, registry_type, package_name)
+        Cache::get_versions(self, registry_type.as_str(), package_name)
     }
 
     fn version_exists(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
         version: &str,
     ) -> Result<bool, CacheError> {
+        let registry_type = registry_type.as_str();
         let conn = self.conn.lock().unwrap();
         let exists: bool = conn.query_row(
             r#"
@@ -297,10 +300,11 @@ impl VersionStorer for Cache {
 
     fn replace_versions(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
         versions: Vec<String>,
     ) -> Result<(), CacheError> {
+        let registry_type = registry_type.as_str();
         debug!(
             "Saving {} versions for {}/{}",
             versions.len(),
@@ -368,17 +372,32 @@ impl VersionStorer for Cache {
 
         let packages = stmt
             .query_map([threshold], |row| {
-                Ok(PackageId {
-                    registry_type: row.get(0)?,
-                    package_name: row.get(1)?,
-                })
+                let registry_type_str: String = row.get(0)?;
+                let package_name: String = row.get(1)?;
+                Ok((registry_type_str, package_name))
             })?
-            .collect::<Result<Vec<PackageId>, _>>()?;
+            .filter_map(|result| {
+                result.ok().and_then(|(registry_type_str, package_name)| {
+                    registry_type_str
+                        .parse::<RegistryType>()
+                        .ok()
+                        .map(|rt| PackageId {
+                            registry_type: rt,
+                            package_name,
+                        })
+                })
+            })
+            .collect();
 
         Ok(packages)
     }
 
-    fn try_start_fetch(&self, registry_type: &str, package_name: &str) -> Result<bool, CacheError> {
+    fn try_start_fetch(
+        &self,
+        registry_type: RegistryType,
+        package_name: &str,
+    ) -> Result<bool, CacheError> {
+        let registry_type = registry_type.as_str();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -417,7 +436,12 @@ impl VersionStorer for Cache {
         Ok(!exists)
     }
 
-    fn finish_fetch(&self, registry_type: &str, package_name: &str) -> Result<(), CacheError> {
+    fn finish_fetch(
+        &self,
+        registry_type: RegistryType,
+        package_name: &str,
+    ) -> Result<(), CacheError> {
+        let registry_type = registry_type.as_str();
         let conn = self.conn.lock().unwrap();
 
         conn.execute(
@@ -430,20 +454,20 @@ impl VersionStorer for Cache {
 
     fn get_dist_tag(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
         tag_name: &str,
     ) -> Result<Option<String>, CacheError> {
-        Cache::get_dist_tag(self, registry_type, package_name, tag_name)
+        Cache::get_dist_tag(self, registry_type.as_str(), package_name, tag_name)
     }
 
     fn save_dist_tags(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
         dist_tags: &HashMap<String, String>,
     ) -> Result<(), CacheError> {
-        Cache::save_dist_tags(self, registry_type, package_name, dist_tags)
+        Cache::save_dist_tags(self, registry_type.as_str(), package_name, dist_tags)
     }
 }
 
@@ -465,7 +489,7 @@ mod tests {
             "2.0.0".to_string(),
         ];
         cache
-            .replace_versions("npm", "axios", versions.clone())
+            .replace_versions(RegistryType::Npm, "axios", versions.clone())
             .unwrap();
 
         let saved = cache.get_versions("npm", "axios").unwrap();
@@ -480,12 +504,12 @@ mod tests {
 
         let initial_versions = vec!["1.0.0".to_string()];
         cache
-            .replace_versions("npm", "axios", initial_versions)
+            .replace_versions(RegistryType::Npm, "axios", initial_versions)
             .unwrap();
 
         let new_versions = vec!["1.0.0".to_string(), "1.1.0".to_string()];
         cache
-            .replace_versions("npm", "axios", new_versions.clone())
+            .replace_versions(RegistryType::Npm, "axios", new_versions.clone())
             .unwrap();
 
         let saved = cache.get_versions("npm", "axios").unwrap();
@@ -510,7 +534,7 @@ mod tests {
 
         let versions: Vec<String> = (0..1000).map(|i| format!("{}.0.0", i)).collect();
         cache
-            .replace_versions("npm", "large-package", versions.clone())
+            .replace_versions(RegistryType::Npm, "large-package", versions.clone())
             .unwrap();
 
         let start = std::time::Instant::now();
@@ -526,13 +550,13 @@ mod tests {
     }
 
     #[rstest]
-    #[case("npm", "axios", "1.0.0", true)]
-    #[case("npm", "axios", "2.0.0", true)]
-    #[case("npm", "axios", "9.9.9", false)]
-    #[case("npm", "nonexistent", "1.0.0", false)]
-    #[case("crates", "axios", "1.0.0", false)]
+    #[case(RegistryType::Npm, "axios", "1.0.0", true)]
+    #[case(RegistryType::Npm, "axios", "2.0.0", true)]
+    #[case(RegistryType::Npm, "axios", "9.9.9", false)]
+    #[case(RegistryType::Npm, "nonexistent", "1.0.0", false)]
+    #[case(RegistryType::CratesIo, "axios", "1.0.0", false)]
     fn version_exists_returns_expected(
-        #[case] registry_type: &str,
+        #[case] registry_type: RegistryType,
         #[case] package_name: &str,
         #[case] version: &str,
         #[case] expected: bool,
@@ -542,7 +566,9 @@ mod tests {
         let cache = Cache::new(&db_path, 86400).unwrap();
 
         let versions = vec!["1.0.0".to_string(), "2.0.0".to_string()];
-        cache.replace_versions("npm", "axios", versions).unwrap();
+        cache
+            .replace_versions(RegistryType::Npm, "axios", versions)
+            .unwrap();
 
         assert_eq!(
             cache
@@ -553,11 +579,11 @@ mod tests {
     }
 
     #[rstest]
-    #[case("npm", "axios", Some("3.0.0".to_string()))]
-    #[case("npm", "nonexistent", None)]
-    #[case("crates", "axios", None)]
+    #[case(RegistryType::Npm, "axios", Some("3.0.0".to_string()))]
+    #[case(RegistryType::Npm, "nonexistent", None)]
+    #[case(RegistryType::CratesIo, "axios", None)]
     fn get_latest_version_returns_last_inserted(
-        #[case] registry_type: &str,
+        #[case] registry_type: RegistryType,
         #[case] package_name: &str,
         #[case] expected: Option<String>,
     ) {
@@ -570,7 +596,9 @@ mod tests {
             "2.0.0".to_string(),
             "3.0.0".to_string(),
         ];
-        cache.replace_versions("npm", "axios", versions).unwrap();
+        cache
+            .replace_versions(RegistryType::Npm, "axios", versions)
+            .unwrap();
 
         assert_eq!(
             cache
@@ -588,10 +616,10 @@ mod tests {
         let cache = Cache::new(&db_path, 100).unwrap();
 
         cache
-            .replace_versions("npm", "axios", vec!["1.0.0".to_string()])
+            .replace_versions(RegistryType::Npm, "axios", vec!["1.0.0".to_string()])
             .unwrap();
         cache
-            .replace_versions("npm", "lodash", vec!["4.0.0".to_string()])
+            .replace_versions(RegistryType::Npm, "lodash", vec!["4.0.0".to_string()])
             .unwrap();
 
         // Wait for packages to become stale
@@ -600,11 +628,11 @@ mod tests {
         let stale = cache.get_packages_needing_refresh().unwrap();
         assert_eq!(stale.len(), 2);
         assert!(stale.contains(&PackageId {
-            registry_type: "npm".to_string(),
+            registry_type: RegistryType::Npm,
             package_name: "axios".to_string()
         }));
         assert!(stale.contains(&PackageId {
-            registry_type: "npm".to_string(),
+            registry_type: RegistryType::Npm,
             package_name: "lodash".to_string()
         }));
     }
@@ -617,7 +645,7 @@ mod tests {
         let cache = Cache::new(&db_path, 3600000).unwrap();
 
         cache
-            .replace_versions("npm", "axios", vec!["1.0.0".to_string()])
+            .replace_versions(RegistryType::Npm, "axios", vec!["1.0.0".to_string()])
             .unwrap();
 
         let stale = cache.get_packages_needing_refresh().unwrap();
@@ -631,7 +659,9 @@ mod tests {
         let cache = Cache::new(&db_path, 86400).unwrap();
 
         // New package not in DB should allow fetch
-        let can_fetch = cache.try_start_fetch("npm", "new-package").unwrap();
+        let can_fetch = cache
+            .try_start_fetch(RegistryType::Npm, "new-package")
+            .unwrap();
         assert!(can_fetch);
     }
 
@@ -643,11 +673,11 @@ mod tests {
 
         // Pre-populate cache (fetching_since is NULL after replace_versions)
         cache
-            .replace_versions("npm", "axios", vec!["1.0.0".to_string()])
+            .replace_versions(RegistryType::Npm, "axios", vec!["1.0.0".to_string()])
             .unwrap();
 
         // Package exists but not being fetched should allow fetch
-        let can_fetch = cache.try_start_fetch("npm", "axios").unwrap();
+        let can_fetch = cache.try_start_fetch(RegistryType::Npm, "axios").unwrap();
         assert!(can_fetch);
     }
 
@@ -659,15 +689,15 @@ mod tests {
 
         // Pre-populate cache
         cache
-            .replace_versions("npm", "axios", vec!["1.0.0".to_string()])
+            .replace_versions(RegistryType::Npm, "axios", vec!["1.0.0".to_string()])
             .unwrap();
 
         // First fetch should succeed
-        let can_fetch1 = cache.try_start_fetch("npm", "axios").unwrap();
+        let can_fetch1 = cache.try_start_fetch(RegistryType::Npm, "axios").unwrap();
         assert!(can_fetch1);
 
         // Second fetch should fail (already being fetched)
-        let can_fetch2 = cache.try_start_fetch("npm", "axios").unwrap();
+        let can_fetch2 = cache.try_start_fetch(RegistryType::Npm, "axios").unwrap();
         assert!(!can_fetch2);
     }
 
@@ -679,18 +709,18 @@ mod tests {
 
         // Pre-populate cache
         cache
-            .replace_versions("npm", "axios", vec!["1.0.0".to_string()])
+            .replace_versions(RegistryType::Npm, "axios", vec!["1.0.0".to_string()])
             .unwrap();
 
         // Start fetch
-        let can_fetch1 = cache.try_start_fetch("npm", "axios").unwrap();
+        let can_fetch1 = cache.try_start_fetch(RegistryType::Npm, "axios").unwrap();
         assert!(can_fetch1);
 
         // Finish fetch
-        cache.finish_fetch("npm", "axios").unwrap();
+        cache.finish_fetch(RegistryType::Npm, "axios").unwrap();
 
         // Should be able to fetch again
-        let can_fetch2 = cache.try_start_fetch("npm", "axios").unwrap();
+        let can_fetch2 = cache.try_start_fetch(RegistryType::Npm, "axios").unwrap();
         assert!(can_fetch2);
     }
 
@@ -736,7 +766,7 @@ mod tests {
             "0.0.0-insiders.abc123".to_string(), // Pre-release published after stable
         ];
         cache
-            .replace_versions("npm", "tailwindcss", versions)
+            .replace_versions(RegistryType::Npm, "tailwindcss", versions)
             .unwrap();
 
         // Set dist-tags with latest pointing to stable version
@@ -748,7 +778,9 @@ mod tests {
             .unwrap();
 
         // get_latest_version should return dist-tags.latest, not the last inserted version
-        let latest = cache.get_latest_version("npm", "tailwindcss").unwrap();
+        let latest = cache
+            .get_latest_version(RegistryType::Npm, "tailwindcss")
+            .unwrap();
         assert_eq!(latest, Some("4.17.21".to_string()));
     }
 
@@ -761,12 +793,12 @@ mod tests {
         // Insert versions without dist-tags (like GitHub Actions)
         let versions = vec!["v3.0.0".to_string(), "v4.0.0".to_string()];
         cache
-            .replace_versions("github_actions", "actions/checkout", versions)
+            .replace_versions(RegistryType::GitHubActions, "actions/checkout", versions)
             .unwrap();
 
         // No dist-tags set, should return last inserted version
         let latest = cache
-            .get_latest_version("github_actions", "actions/checkout")
+            .get_latest_version(RegistryType::GitHubActions, "actions/checkout")
             .unwrap();
         assert_eq!(latest, Some("v4.0.0".to_string()));
     }

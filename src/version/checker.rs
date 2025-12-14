@@ -3,6 +3,7 @@
 #[cfg(test)]
 use mockall::automock;
 
+use crate::parser::types::RegistryType;
 use crate::version::error::CacheError;
 use crate::version::matcher::VersionMatcher;
 use crate::version::semver::CompareResult;
@@ -15,21 +16,21 @@ pub trait VersionStorer: Send + Sync + 'static {
     /// Get the latest version for a package
     fn get_latest_version(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
     ) -> Result<Option<String>, CacheError>;
 
     /// Get all versions for a package
     fn get_versions(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
     ) -> Result<Vec<String>, CacheError>;
 
     /// Check if a specific version exists for a package
     fn version_exists(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
         version: &str,
     ) -> Result<bool, CacheError>;
@@ -37,7 +38,7 @@ pub trait VersionStorer: Send + Sync + 'static {
     /// Replace all versions for a package
     fn replace_versions(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
         versions: Vec<String>,
     ) -> Result<(), CacheError>;
@@ -47,15 +48,23 @@ pub trait VersionStorer: Send + Sync + 'static {
 
     /// Try to start fetching a package. Returns true if fetch can proceed.
     /// Returns false if another process is already fetching this package.
-    fn try_start_fetch(&self, registry_type: &str, package_name: &str) -> Result<bool, CacheError>;
+    fn try_start_fetch(
+        &self,
+        registry_type: RegistryType,
+        package_name: &str,
+    ) -> Result<bool, CacheError>;
 
     /// Mark fetch as complete (success or failure)
-    fn finish_fetch(&self, registry_type: &str, package_name: &str) -> Result<(), CacheError>;
+    fn finish_fetch(
+        &self,
+        registry_type: RegistryType,
+        package_name: &str,
+    ) -> Result<(), CacheError>;
 
     /// Get a specific dist tag for a package (e.g., "latest" -> "4.17.21")
     fn get_dist_tag(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
         tag_name: &str,
     ) -> Result<Option<String>, CacheError>;
@@ -63,7 +72,7 @@ pub trait VersionStorer: Send + Sync + 'static {
     /// Save dist tags for a package
     fn save_dist_tags(
         &self,
-        registry_type: &str,
+        registry_type: RegistryType,
         package_name: &str,
         dist_tags: &std::collections::HashMap<String, String>,
     ) -> Result<(), CacheError>;
@@ -128,7 +137,7 @@ pub fn compare_version<S: VersionStorer>(
     package_name: &str,
     current_version: &str,
 ) -> Result<VersionCompareResult, CacheError> {
-    let registry_type = matcher.registry_type().as_str();
+    let registry_type = matcher.registry_type();
 
     // Get latest version from storer
     let latest_version = storer.get_latest_version(registry_type, package_name)?;
@@ -217,7 +226,7 @@ mod tests {
     impl VersionStorer for MockStorer {
         fn get_latest_version(
             &self,
-            _registry_type: &str,
+            _registry_type: RegistryType,
             _package_name: &str,
         ) -> Result<Option<String>, CacheError> {
             Ok(self.latest_version.clone())
@@ -225,7 +234,7 @@ mod tests {
 
         fn get_versions(
             &self,
-            _registry_type: &str,
+            _registry_type: RegistryType,
             _package_name: &str,
         ) -> Result<Vec<String>, CacheError> {
             Ok(self.existing_versions.clone())
@@ -233,7 +242,7 @@ mod tests {
 
         fn version_exists(
             &self,
-            _registry_type: &str,
+            _registry_type: RegistryType,
             _package_name: &str,
             version: &str,
         ) -> Result<bool, CacheError> {
@@ -242,7 +251,7 @@ mod tests {
 
         fn replace_versions(
             &self,
-            _registry_type: &str,
+            _registry_type: RegistryType,
             _package_name: &str,
             _versions: Vec<String>,
         ) -> Result<(), CacheError> {
@@ -255,7 +264,7 @@ mod tests {
 
         fn try_start_fetch(
             &self,
-            _registry_type: &str,
+            _registry_type: RegistryType,
             _package_name: &str,
         ) -> Result<bool, CacheError> {
             Ok(true)
@@ -263,7 +272,7 @@ mod tests {
 
         fn finish_fetch(
             &self,
-            _registry_type: &str,
+            _registry_type: RegistryType,
             _package_name: &str,
         ) -> Result<(), CacheError> {
             Ok(())
@@ -271,7 +280,7 @@ mod tests {
 
         fn get_dist_tag(
             &self,
-            _registry_type: &str,
+            _registry_type: RegistryType,
             _package_name: &str,
             tag_name: &str,
         ) -> Result<Option<String>, CacheError> {
@@ -280,7 +289,7 @@ mod tests {
 
         fn save_dist_tags(
             &self,
-            _registry_type: &str,
+            _registry_type: RegistryType,
             _package_name: &str,
             _dist_tags: &std::collections::HashMap<String, String>,
         ) -> Result<(), CacheError> {

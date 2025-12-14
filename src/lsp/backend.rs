@@ -129,10 +129,7 @@ impl<S: VersionStorer> Backend<S> {
             return;
         };
 
-        let Some(registry) = self.registries.get(&RegistryType::GitHubActions).cloned() else {
-            warn!("GitHub Actions registry not available");
-            return;
-        };
+        let registries = self.registries.clone();
 
         tokio::spawn(async move {
             let Some(packages) = storer
@@ -150,14 +147,20 @@ impl<S: VersionStorer> Backend<S> {
 
             info!("{} packages need refresh", packages.len());
 
-            // Filter to only GitHub Actions packages for now
-            let github_packages: Vec<_> = packages
-                .into_iter()
-                .filter(|p| p.registry_type == RegistryType::GitHubActions.as_str())
-                .collect();
+            // Group packages by registry type
+            let mut packages_by_registry: HashMap<RegistryType, Vec<_>> = HashMap::new();
+            for package in packages {
+                packages_by_registry
+                    .entry(package.registry_type)
+                    .or_default()
+                    .push(package);
+            }
 
-            if !github_packages.is_empty() {
-                refresh_packages(&*storer, &*registry, github_packages).await;
+            // Refresh packages for each registry type
+            for (registry_type, packages) in packages_by_registry {
+                if let Some(registry) = registries.get(&registry_type) {
+                    refresh_packages(&*storer, &**registry, packages).await;
+                }
             }
         });
     }

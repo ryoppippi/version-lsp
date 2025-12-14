@@ -25,6 +25,20 @@ impl RegistryType {
     }
 }
 
+impl std::str::FromStr for RegistryType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "github_actions" => Ok(RegistryType::GitHubActions),
+            "npm" => Ok(RegistryType::Npm),
+            "crates_io" => Ok(RegistryType::CratesIo),
+            "go_proxy" => Ok(RegistryType::GoProxy),
+            _ => Err(()),
+        }
+    }
+}
+
 /// Detect the appropriate parser type based on URI
 pub fn detect_parser_type(uri: &str) -> Option<RegistryType> {
     if is_github_actions_workflow(uri) {
