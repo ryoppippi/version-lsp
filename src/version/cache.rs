@@ -469,6 +469,52 @@ impl VersionStorer for Cache {
     ) -> Result<(), CacheError> {
         Cache::save_dist_tags(self, registry_type.as_str(), package_name, dist_tags)
     }
+
+    fn filter_packages_not_in_cache(
+        &self,
+        registry_type: RegistryType,
+        package_names: &[String],
+    ) -> Result<Vec<String>, CacheError> {
+        if package_names.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let registry_type = registry_type.as_str();
+        let conn = self.conn.lock().unwrap();
+
+        // Build WHERE IN clause with placeholders
+        let placeholders: Vec<_> = (0..package_names.len())
+            .map(|i| format!("?{}", i + 2))
+            .collect();
+        let placeholders_str = placeholders.join(", ");
+
+        let query = format!(
+            "SELECT package_name FROM packages WHERE registry_type = ?1 AND package_name IN ({})",
+            placeholders_str
+        );
+
+        let mut stmt = conn.prepare(&query)?;
+
+        // Build params: registry_type followed by all package names
+        let params: Vec<&dyn rusqlite::ToSql> =
+            std::iter::once(&registry_type as &dyn rusqlite::ToSql)
+                .chain(package_names.iter().map(|s| s as &dyn rusqlite::ToSql))
+                .collect();
+
+        let cached_packages: std::collections::HashSet<String> = stmt
+            .query_map(params.as_slice(), |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Return packages that are NOT in the cache (preserving original order)
+        let not_in_cache = package_names
+            .iter()
+            .filter(|name| !cached_packages.contains(*name))
+            .cloned()
+            .collect();
+
+        Ok(not_in_cache)
+    }
 }
 
 #[cfg(test)]
@@ -801,5 +847,94 @@ mod tests {
             .get_latest_version(RegistryType::GitHubActions, "actions/checkout")
             .unwrap();
         assert_eq!(latest, Some("v4.0.0".to_string()));
+    }
+
+    #[test]
+    fn filter_packages_not_in_cache_returns_only_missing_packages() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let cache = Cache::new(&db_path, 86400).unwrap();
+
+        // Add some packages to cache
+        cache
+            .replace_versions(RegistryType::Npm, "axios", vec!["1.0.0".to_string()])
+            .unwrap();
+        cache
+            .replace_versions(RegistryType::Npm, "lodash", vec!["4.0.0".to_string()])
+            .unwrap();
+
+        // Query for a mix of cached and uncached packages
+        let package_names = vec![
+            "axios".to_string(),   // cached
+            "lodash".to_string(),  // cached
+            "express".to_string(), // NOT cached
+            "react".to_string(),   // NOT cached
+        ];
+
+        let not_in_cache = cache
+            .filter_packages_not_in_cache(RegistryType::Npm, &package_names)
+            .unwrap();
+
+        // Should only return packages NOT in cache
+        assert_eq!(
+            not_in_cache,
+            vec!["express".to_string(), "react".to_string()]
+        );
+    }
+
+    #[test]
+    fn filter_packages_not_in_cache_returns_empty_when_all_cached() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let cache = Cache::new(&db_path, 86400).unwrap();
+
+        cache
+            .replace_versions(RegistryType::Npm, "axios", vec!["1.0.0".to_string()])
+            .unwrap();
+
+        let package_names = vec!["axios".to_string()];
+        let not_in_cache = cache
+            .filter_packages_not_in_cache(RegistryType::Npm, &package_names)
+            .unwrap();
+
+        assert!(not_in_cache.is_empty());
+    }
+
+    #[test]
+    fn filter_packages_not_in_cache_returns_all_when_none_cached() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let cache = Cache::new(&db_path, 86400).unwrap();
+
+        let package_names = vec!["express".to_string(), "react".to_string()];
+        let not_in_cache = cache
+            .filter_packages_not_in_cache(RegistryType::Npm, &package_names)
+            .unwrap();
+
+        assert_eq!(
+            not_in_cache,
+            vec!["express".to_string(), "react".to_string()]
+        );
+    }
+
+    #[test]
+    fn filter_packages_not_in_cache_respects_registry_type() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let cache = Cache::new(&db_path, 86400).unwrap();
+
+        // Add package to npm registry
+        cache
+            .replace_versions(RegistryType::Npm, "axios", vec!["1.0.0".to_string()])
+            .unwrap();
+
+        // Query same package name but different registry
+        let package_names = vec!["axios".to_string()];
+        let not_in_cache = cache
+            .filter_packages_not_in_cache(RegistryType::CratesIo, &package_names)
+            .unwrap();
+
+        // Should return axios because it's not in CratesIo registry
+        assert_eq!(not_in_cache, vec!["axios".to_string()]);
     }
 }

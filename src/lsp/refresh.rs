@@ -125,17 +125,29 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
     registry: &dyn Registry,
     packages: &[PackageInfo],
 ) -> Vec<String> {
-    // First, filter to packages not in cache (fast, sequential check)
+    if packages.is_empty() {
+        return Vec::new();
+    }
+
+    // Get registry type from the first package (all packages should have the same registry type)
+    let registry_type = packages[0].registry_type;
+
+    // Get all package names for batch query
+    let package_names: Vec<_> = packages.iter().map(|p| p.name.clone()).collect();
+
+    // Filter to packages not in cache using batch WHERE IN query
+    let not_in_cache = storer
+        .filter_packages_not_in_cache(registry_type, &package_names)
+        .inspect_err(|e| error!("Failed to filter packages not in cache: {}", e))
+        .unwrap_or_default();
+
+    // Create a HashSet for efficient lookup
+    let not_in_cache_set: std::collections::HashSet<_> = not_in_cache.into_iter().collect();
+
+    // Filter original packages to those not in cache
     let packages_to_fetch: Vec<_> = packages
         .iter()
-        .filter(|package| {
-            let in_cache = storer
-                .get_latest_version(package.registry_type, &package.name)
-                .ok()
-                .flatten()
-                .is_some();
-            !in_cache
-        })
+        .filter(|p| not_in_cache_set.contains(&p.name))
         .collect();
 
     if packages_to_fetch.is_empty() {
@@ -248,11 +260,7 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
         });
 
     // Execute all fetches concurrently and collect results
-    join_all(futures)
-        .await
-        .into_iter()
-        .flatten()
-        .collect()
+    join_all(futures).await.into_iter().flatten().collect()
 }
 
 #[cfg(test)]

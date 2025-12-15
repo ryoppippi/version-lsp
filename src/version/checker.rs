@@ -76,6 +76,14 @@ pub trait VersionStorer: Send + Sync + 'static {
         package_name: &str,
         dist_tags: &std::collections::HashMap<String, String>,
     ) -> Result<(), CacheError>;
+
+    /// Filter packages that are not in the cache
+    /// Returns package names that have no entries in the cache
+    fn filter_packages_not_in_cache(
+        &self,
+        registry_type: RegistryType,
+        package_names: &[String],
+    ) -> Result<Vec<String>, CacheError>;
 }
 
 /// Result of version comparison
@@ -294,6 +302,15 @@ mod tests {
             _dist_tags: &std::collections::HashMap<String, String>,
         ) -> Result<(), CacheError> {
             Ok(())
+        }
+
+        fn filter_packages_not_in_cache(
+            &self,
+            _registry_type: RegistryType,
+            package_names: &[String],
+        ) -> Result<Vec<String>, CacheError> {
+            // Return all packages as not in cache (mock behavior)
+            Ok(package_names.to_vec())
         }
     }
 
