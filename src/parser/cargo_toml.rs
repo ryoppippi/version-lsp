@@ -117,29 +117,61 @@ impl CargoTomlParser {
         let mut cursor = pair_node.walk();
         let mut package_name: Option<String> = None;
         let mut version_info: Option<(String, usize, usize, usize, usize)> = None;
+        let mut is_dotted_key = false;
+        let mut dotted_key_suffix: Option<String> = None;
 
         for child in pair_node.children(&mut cursor) {
             match child.kind() {
-                "bare_key" | "dotted_key" => {
+                "bare_key" => {
                     package_name = Some(content[child.byte_range()].to_string());
                 }
+                "dotted_key" => {
+                    // Handle dotted keys like "serde.version" or "shared.workspace"
+                    is_dotted_key = true;
+                    let key_text = &content[child.byte_range()];
+                    if let Some((pkg, suffix)) = key_text.split_once('.') {
+                        package_name = Some(pkg.to_string());
+                        dotted_key_suffix = Some(suffix.to_string());
+                    }
+                }
                 "string" => {
-                    // Simple version: serde = "1.0"
-                    let text = &content[child.byte_range()];
-                    let version = text
-                        .trim()
-                        .trim_start_matches('"')
-                        .trim_end_matches('"')
-                        .to_string();
-                    let start_point = child.start_position();
-                    // Adjust for quotes
-                    version_info = Some((
-                        version,
-                        child.start_byte() + 1,
-                        child.end_byte() - 1,
-                        start_point.row,
-                        start_point.column + 1,
-                    ));
+                    // Simple version: serde = "1.0" or dotted: serde.version = "1.0"
+                    if is_dotted_key {
+                        // For dotted keys, only extract if suffix is "version"
+                        if dotted_key_suffix.as_deref() == Some("version") {
+                            let text = &content[child.byte_range()];
+                            let version = text
+                                .trim()
+                                .trim_start_matches('"')
+                                .trim_end_matches('"')
+                                .to_string();
+                            let start_point = child.start_position();
+                            version_info = Some((
+                                version,
+                                child.start_byte() + 1,
+                                child.end_byte() - 1,
+                                start_point.row,
+                                start_point.column + 1,
+                            ));
+                        }
+                        // Skip if suffix is path, workspace, registry, or other
+                    } else {
+                        // Non-dotted simple version: serde = "1.0"
+                        let text = &content[child.byte_range()];
+                        let version = text
+                            .trim()
+                            .trim_start_matches('"')
+                            .trim_end_matches('"')
+                            .to_string();
+                        let start_point = child.start_position();
+                        version_info = Some((
+                            version,
+                            child.start_byte() + 1,
+                            child.end_byte() - 1,
+                            start_point.row,
+                            start_point.column + 1,
+                        ));
+                    }
                 }
                 "inline_table" => {
                     // Inline table: serde = { version = "1.0", features = ["derive"] }
@@ -165,14 +197,23 @@ impl CargoTomlParser {
         }
     }
 
+    /// Keys that indicate dependencies that should be skipped
+    const SKIP_KEYS: [&'static str; 3] = ["path", "workspace", "registry"];
+
     /// Extract version from an inline table: { version = "1.0", ... }
+    /// Returns None if the dependency should be skipped (path, workspace, or registry)
     fn extract_version_from_inline_table(
         &self,
         table_node: tree_sitter::Node,
         content: &str,
     ) -> Option<(String, usize, usize, usize, usize)> {
-        let mut cursor = table_node.walk();
+        // First pass: check for skip keys
+        if self.should_skip_inline_table(table_node, content) {
+            return None;
+        }
 
+        // Second pass: extract version
+        let mut cursor = table_node.walk();
         for child in table_node.children(&mut cursor) {
             if child.kind() == "pair" {
                 let mut pair_cursor = child.walk();
@@ -207,6 +248,28 @@ impl CargoTomlParser {
         }
 
         None
+    }
+
+    /// Check if an inline table contains keys that should cause the dependency to be skipped
+    fn should_skip_inline_table(&self, table_node: tree_sitter::Node, content: &str) -> bool {
+        let mut cursor = table_node.walk();
+
+        for child in table_node.children(&mut cursor) {
+            if child.kind() == "pair" {
+                let mut pair_cursor = child.walk();
+
+                for pair_child in child.children(&mut pair_cursor) {
+                    if pair_child.kind() == "bare_key" {
+                        let key = &content[pair_child.byte_range()];
+                        if Self::SKIP_KEYS.contains(&key) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
     }
 }
 
@@ -356,5 +419,106 @@ thiserror = "=2.0"
         assert_eq!(result[1].version, "~1.35");
         assert_eq!(result[2].version, ">=1.0");
         assert_eq!(result[3].version, "=2.0");
+    }
+
+    #[test]
+    fn parse_skips_path_dependencies() {
+        let parser = CargoTomlParser::new();
+        let content = r#"[dependencies]
+serde = "1.0"
+local-crate = { path = "../local-crate" }
+tokio = "1.0"
+another-local = { path = "./another", version = "0.1" }
+"#;
+        let result = parser.parse(content).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "serde");
+        assert_eq!(result[1].name, "tokio");
+    }
+
+    #[test]
+    fn parse_skips_workspace_dependencies() {
+        let parser = CargoTomlParser::new();
+        let content = r#"[dependencies]
+serde = "1.0"
+shared = { workspace = true }
+tokio = "1.0"
+utils = { workspace = true, features = ["full"] }
+"#;
+        let result = parser.parse(content).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "serde");
+        assert_eq!(result[1].name, "tokio");
+    }
+
+    #[test]
+    fn parse_skips_registry_dependencies() {
+        let parser = CargoTomlParser::new();
+        let content = r#"[dependencies]
+serde = "1.0"
+private-crate = { version = "1.0", registry = "my-registry" }
+tokio = "1.0"
+"#;
+        let result = parser.parse(content).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "serde");
+        assert_eq!(result[1].name, "tokio");
+    }
+
+    #[test]
+    fn parse_skips_mixed_special_dependencies() {
+        let parser = CargoTomlParser::new();
+        let content = r#"[dependencies]
+serde = "1.0"
+local = { path = "../local" }
+workspace-dep = { workspace = true }
+private = { version = "1.0", registry = "private" }
+tokio = { version = "1.0", features = ["full"] }
+"#;
+        let result = parser.parse(content).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "serde");
+        assert_eq!(result[1].name, "tokio");
+    }
+
+    #[test]
+    fn parse_skips_dotted_workspace_dependencies() {
+        let parser = CargoTomlParser::new();
+        let content = r#"[dependencies]
+serde = "1.0"
+shared.workspace = true
+tokio = "1.0"
+"#;
+        let result = parser.parse(content).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "serde");
+        assert_eq!(result[1].name, "tokio");
+    }
+
+    #[test]
+    fn parse_skips_dotted_path_dependencies() {
+        let parser = CargoTomlParser::new();
+        let content = r#"[dependencies]
+serde = "1.0"
+local.path = "../local"
+tokio = "1.0"
+"#;
+        let result = parser.parse(content).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "serde");
+        assert_eq!(result[1].name, "tokio");
+    }
+
+    #[test]
+    fn parse_extracts_dotted_version() {
+        let parser = CargoTomlParser::new();
+        let content = r#"[dependencies]
+serde.version = "1.0"
+serde.features = ["derive"]
+"#;
+        let result = parser.parse(content).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "serde");
+        assert_eq!(result[0].version, "1.0");
     }
 }

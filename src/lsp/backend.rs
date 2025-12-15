@@ -9,6 +9,7 @@ use tracing::{error, info, warn};
 use crate::config::{DEFAULT_REFRESH_INTERVAL_MS, data_dir, db_path};
 use crate::lsp::diagnostics::generate_diagnostics;
 use crate::lsp::refresh::{fetch_missing_packages, refresh_packages};
+use crate::parser::cargo_toml::CargoTomlParser;
 use crate::parser::github_actions::GitHubActionsParser;
 use crate::parser::package_json::PackageJsonParser;
 use crate::parser::traits::Parser;
@@ -16,7 +17,8 @@ use crate::parser::types::{RegistryType, detect_parser_type};
 use crate::version::cache::Cache;
 use crate::version::checker::VersionStorer;
 use crate::version::matcher::VersionMatcher;
-use crate::version::matchers::{GitHubActionsMatcher, NpmVersionMatcher};
+use crate::version::matchers::{CratesVersionMatcher, GitHubActionsMatcher, NpmVersionMatcher};
+use crate::version::registries::crates_io::CratesIoRegistry;
 use crate::version::registries::github::GitHubRegistry;
 use crate::version::registries::npm::NpmRegistry;
 use crate::version::registry::Registry;
@@ -90,6 +92,7 @@ impl<S: VersionStorer> Backend<S> {
             Arc::new(GitHubActionsParser::new()),
         );
         parsers.insert(RegistryType::Npm, Arc::new(PackageJsonParser::new()));
+        parsers.insert(RegistryType::CratesIo, Arc::new(CargoTomlParser::new()));
         parsers
     }
 
@@ -97,6 +100,7 @@ impl<S: VersionStorer> Backend<S> {
         let mut matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>> = HashMap::new();
         matchers.insert(RegistryType::GitHubActions, Arc::new(GitHubActionsMatcher));
         matchers.insert(RegistryType::Npm, Arc::new(NpmVersionMatcher));
+        matchers.insert(RegistryType::CratesIo, Arc::new(CratesVersionMatcher));
         matchers
     }
 
@@ -107,6 +111,7 @@ impl<S: VersionStorer> Backend<S> {
             Arc::new(GitHubRegistry::default()),
         );
         registries.insert(RegistryType::Npm, Arc::new(NpmRegistry::default()));
+        registries.insert(RegistryType::CratesIo, Arc::new(CratesIoRegistry::default()));
         registries
     }
 

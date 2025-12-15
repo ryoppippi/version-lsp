@@ -7,7 +7,7 @@
 
 use crate::parser::types::RegistryType;
 use crate::version::matcher::VersionMatcher;
-use crate::version::semver::{CompareResult, compare_versions, version_matches_any};
+use crate::version::semver::{compare_versions, version_matches_any, CompareResult};
 
 pub struct GitHubActionsMatcher;
 

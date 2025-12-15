@@ -498,46 +498,46 @@ npm の範囲指定 (`^1.0.0`, `~1.0.0`) と GitHub Actions の部分マッチ�
 
 ---
 
-### Phase 12: crates.io API
+### Phase 12: crates.io API ✅
 
 #### 12.1 crates.io APIの実装
 
-- [ ] [RED] crates.io APIのテスト作成 (`src/version/registries/crates_io.rs`内の`#[cfg(test)]`)
+- [x] [RED] crates.io APIのテスト作成 (`src/version/registries/crates_io.rs`内の`#[cfg(test)]`)
   - モックAPIサーバーでテスト
   - `fetch_all_versions()`で全バージョンを取得できることを確認
 
-- [ ] [GREEN] crates.io APIの実装 (`src/version/registries/crates_io.rs`)
+- [x] [GREEN] crates.io APIの実装 (`src/version/registries/crates_io.rs`)
   - reqwestでcrates.io API (`https://crates.io/api/v1/crates/{crate}`)を呼び出し
   - `versions`配列から全バージョンを抽出
 
-- [ ] [REFACTOR] エラーハンドリング
+- [x] [REFACTOR] エラーハンドリング
   - 存在しないクレート（404）
 
 #### 12.2 CratesVersionMatcher 実装
 
-- [ ] [RED] CratesVersionMatcher のテスト作成 (`src/version/matchers/crates.rs`内の`#[cfg(test)]`)
+- [x] [RED] CratesVersionMatcher のテスト作成 (`src/version/matchers/crates.rs`内の`#[cfg(test)]`)
   - Cargo.tomlのバージョン要件テスト (`^1.0`, `~1.0`, `>=1.0`, `=1.0`, etc.)
   - 完全一致のテスト (`1.0.0`)
 
-- [ ] [GREEN] CratesVersionMatcher の実装 (`src/version/matchers/crates.rs`)
+- [x] [GREEN] CratesVersionMatcher の実装 (`src/version/matchers/crates.rs`)
   - Cargoのバージョン要件パース（npmと類似だが微妙に異なる）
   - `VersionMatcher` トレイトを実装
 
-- [ ] [REFACTOR] エッジケースの対応
+- [x] [REFACTOR] エッジケースの対応
   - ワイルドカード (`*`) の処理
 
 #### 12.3 Cargo.toml統合とE2Eテスト
 
-- [ ] [RED] E2Eテスト作成 (`tests/lsp_e2e_test.rs`)
+- [x] [RED] E2Eテスト作成 (`tests/lsp_e2e_test.rs`)
   - Cargo.tomlのdidOpen時にdiagnosticsが発行されることを確認
   - 古いバージョン、存在しないバージョンのケース
 
-- [ ] [GREEN] Backend統合
+- [x] [GREEN] Backend統合
   - `initialize_parsers()`に`CargoTomlParser`を追加
-  - `initialize_registries()`に`CratesRegistry`を追加
+  - `initialize_registries()`に`CratesIoRegistry`を追加
   - `initialize_matchers()`に`CratesVersionMatcher`を追加
 
-- [ ] [REFACTOR] 動作確認
+- [x] [REFACTOR] 動作確認
   - Cargo.toml に対する動作確認
   - 全テスト通過確認
 
