@@ -111,7 +111,10 @@ impl<S: VersionStorer> Backend<S> {
             Arc::new(GitHubRegistry::default()),
         );
         registries.insert(RegistryType::Npm, Arc::new(NpmRegistry::default()));
-        registries.insert(RegistryType::CratesIo, Arc::new(CratesIoRegistry::default()));
+        registries.insert(
+            RegistryType::CratesIo,
+            Arc::new(CratesIoRegistry::default()),
+        );
         registries
     }
 
