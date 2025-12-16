@@ -30,7 +30,7 @@ use crate::version::registry::Registry;
 pub struct Backend<S: VersionStorer> {
     client: Client,
     storer: Option<Arc<S>>,
-    config: RwLock<LspConfig>,
+    config: Arc<RwLock<LspConfig>>,
     parsers: HashMap<RegistryType, Arc<dyn Parser>>,
     matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>>,
     registries: HashMap<RegistryType, Arc<dyn Registry>>,
@@ -46,7 +46,7 @@ impl Backend<Cache> {
         Self {
             client,
             storer,
-            config: RwLock::new(config),
+            config: Arc::new(RwLock::new(config)),
             parsers,
             matchers,
             registries,
@@ -86,7 +86,7 @@ impl<S: VersionStorer> Backend<S> {
         Self {
             client,
             storer: Some(storer),
-            config: RwLock::new(LspConfig::default()),
+            config: Arc::new(RwLock::new(LspConfig::default())),
             parsers: Self::initialize_parsers(),
             matchers: Self::initialize_matchers(),
             registries,
@@ -104,22 +104,40 @@ impl<S: VersionStorer> Backend<S> {
         }
     }
 
-    /// Update configuration from a JSON value
-    /// Returns error message if parsing fails
-    fn update_config(&self, value: serde_json::Value) -> Option<String> {
-        match serde_json::from_value::<LspConfig>(value) {
-            Ok(new_config) => {
-                info!("Configuration updated: {:?}", new_config);
-                let mut config = self.config.write().expect("config lock poisoned");
-                *config = new_config;
-                None
+    /// Spawn background task to fetch configuration from client
+    fn spawn_fetch_configuration(&self) {
+        let client = self.client.clone();
+        let config = self.config.clone();
+
+        tokio::spawn(async move {
+            let items = vec![ConfigurationItem {
+                scope_uri: None,
+                section: Some("version-lsp".to_string()),
+            }];
+
+            match client.configuration(items).await {
+                Ok(configs) => {
+                    if let Some(config_value) = configs.into_iter().next() {
+                        match serde_json::from_value::<LspConfig>(config_value) {
+                            Ok(new_config) => {
+                                info!("Configuration updated: {:?}", new_config);
+                                let mut cfg = config.write().expect("config lock poisoned");
+                                *cfg = new_config;
+                            }
+                            Err(e) => {
+                                let msg = format!("Failed to parse configuration: {}", e);
+                                warn!("{}", msg);
+                                client.show_message(MessageType::ERROR, msg).await;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Client may not support workspace/configuration, which is fine
+                    debug!("workspace/configuration request failed: {}", e);
+                }
             }
-            Err(e) => {
-                let msg = format!("Failed to parse configuration: {}", e);
-                warn!("{}", msg);
-                Some(msg)
-            }
-        }
+        });
     }
 
     fn initialize_parsers() -> HashMap<RegistryType, Arc<dyn Parser>> {
@@ -321,24 +339,10 @@ impl<S: VersionStorer> LanguageServer for Backend<S> {
             .log_message(MessageType::INFO, "LSP server initialized")
             .await;
 
+        // Request configuration from client via workspace/configuration (non-blocking)
+        self.spawn_fetch_configuration();
+
         self.spawn_background_refresh();
-    }
-
-    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        debug!("Configuration changed: {:?}", params.settings);
-
-        // Try to extract version-lsp config from settings
-        let error_msg = if let Some(config_value) = params.settings.get("version-lsp") {
-            self.update_config(config_value.clone())
-        } else {
-            // Some clients send the config directly without the section wrapper
-            self.update_config(params.settings)
-        };
-
-        // Notify client of configuration error via window/showMessage
-        if let Some(msg) = error_msg {
-            self.client.show_message(MessageType::ERROR, msg).await;
-        }
     }
 
     async fn shutdown(&self) -> Result<()> {

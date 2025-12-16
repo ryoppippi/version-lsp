@@ -17,12 +17,12 @@ A Language Server Protocol (LSP) implementation that provides version checking d
 
 ## Supported Files
 
-| File | Registry |
-|------|----------|
-| `package.json` | npm |
-| `Cargo.toml` | crates.io |
-| `go.mod` | Go Proxy |
-| `.github/workflows/*.yml` | GitHub Releases |
+| File                                                  | Registry        |
+|-------------------------------------------------------|-----------------|
+| `package.json`                                        | npm             |
+| `Cargo.toml`                                          | crates.io       |
+| `go.mod`                                              | Go Proxy        |
+| `.github/workflows/*.yaml`/`.github/actions/*/*.yaml` | GitHub Releases |
 
 ## Installation
 
@@ -57,75 +57,32 @@ if not configs.version_lsp then
   }
 end
 
-lspconfig.version_lsp.setup({})
-```
-
-### VSCode
-
-Create `.vscode/settings.json` in your project:
-
-```json
-{
-  "version-lsp.enable": true
-}
-```
-
-Note: VSCode extension is not yet available. Use a generic LSP client extension.
-
-### Helix
-
-Add to `~/.config/helix/languages.toml`:
-
-```toml
-[language-server.version-lsp]
-command = "version-lsp"
-
-[[language]]
-name = "json"
-language-servers = ["version-lsp"]
-
-[[language]]
-name = "toml"
-language-servers = ["version-lsp"]
-
-[[language]]
-name = "gomod"
-language-servers = ["version-lsp"]
-
-[[language]]
-name = "yaml"
-language-servers = ["version-lsp"]
-```
-
-## Configuration
-
-The LSP server accepts the following configuration options via `workspace/didChangeConfiguration`:
-
-```json
-{
-  "version-lsp": {
-    "cache": {
-      "refreshInterval": 86400000
+lspconfig.version_lsp.setup({
+  settings = {
+    ["version-lsp"] = {
+      cache = {
+        refreshInterval = 86400000,  -- 24 hours (milliseconds)
+      },
+      registries = {
+        npm = { enabled = true },
+        crates = { enabled = true },
+        goProxy = { enabled = true },
+        github = { enabled = true },
+      },
     },
-    "registries": {
-      "npm": { "enabled": true },
-      "crates": { "enabled": true },
-      "goProxy": { "enabled": true },
-      "github": { "enabled": true }
-    }
-  }
-}
+  },
+})
 ```
 
 ### Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `cache.refreshInterval` | number | `86400000` | Cache refresh interval in milliseconds (default: 24 hours) |
-| `registries.npm.enabled` | boolean | `true` | Enable npm registry checks |
-| `registries.crates.enabled` | boolean | `true` | Enable crates.io registry checks |
-| `registries.goProxy.enabled` | boolean | `true` | Enable Go Proxy registry checks |
-| `registries.github.enabled` | boolean | `true` | Enable GitHub Releases checks |
+| Option                       | Type    | Default    | Description                                                |
+|------------------------------|---------|------------|------------------------------------------------------------|
+| `cache.refreshInterval`      | number  | `86400000` | Cache refresh interval in milliseconds (default: 24 hours) |
+| `registries.npm.enabled`     | boolean | `true`     | Enable npm registry checks                                 |
+| `registries.crates.enabled`  | boolean | `true`     | Enable crates.io registry checks                           |
+| `registries.goProxy.enabled` | boolean | `true`     | Enable Go Proxy registry checks                            |
+| `registries.github.enabled`  | boolean | `true`     | Enable GitHub Releases checks                              |
 
 ## Data Storage
 
