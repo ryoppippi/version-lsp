@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
-use crate::config::{DEFAULT_REFRESH_INTERVAL_MS, data_dir, db_path};
+use crate::config::{LspConfig, data_dir, db_path};
 use crate::lsp::diagnostics::generate_diagnostics;
 use crate::lsp::refresh::{fetch_missing_packages, refresh_packages};
 use crate::parser::cargo_toml::CargoTomlParser;
@@ -30,6 +30,7 @@ use crate::version::registry::Registry;
 pub struct Backend<S: VersionStorer> {
     client: Client,
     storer: Option<Arc<S>>,
+    config: RwLock<LspConfig>,
     parsers: HashMap<RegistryType, Arc<dyn Parser>>,
     matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>>,
     registries: HashMap<RegistryType, Arc<dyn Registry>>,
@@ -37,20 +38,22 @@ pub struct Backend<S: VersionStorer> {
 
 impl Backend<Cache> {
     pub fn new(client: Client) -> Self {
-        let storer = Self::initialize_storer();
+        let config = LspConfig::default();
+        let storer = Self::initialize_storer(&config);
         let parsers = Self::initialize_parsers();
         let matchers = Self::initialize_matchers();
         let registries = Self::initialize_registries();
         Self {
             client,
             storer,
+            config: RwLock::new(config),
             parsers,
             matchers,
             registries,
         }
     }
 
-    fn initialize_storer() -> Option<Arc<Cache>> {
+    fn initialize_storer(config: &LspConfig) -> Option<Arc<Cache>> {
         let data_dir = data_dir();
         let db_path = db_path();
 
@@ -60,7 +63,7 @@ impl Backend<Cache> {
             return None;
         }
 
-        match Cache::new(&db_path, DEFAULT_REFRESH_INTERVAL_MS) {
+        match Cache::new(&db_path, config.cache.refresh_interval) {
             Ok(cache) => {
                 info!("Cache initialized at {:?}", db_path);
                 Some(Arc::new(cache))
@@ -83,9 +86,35 @@ impl<S: VersionStorer> Backend<S> {
         Self {
             client,
             storer: Some(storer),
+            config: RwLock::new(LspConfig::default()),
             parsers: Self::initialize_parsers(),
             matchers: Self::initialize_matchers(),
             registries,
+        }
+    }
+
+    /// Check if a registry is enabled in the configuration
+    fn is_registry_enabled(&self, registry_type: RegistryType) -> bool {
+        let config = self.config.read().unwrap();
+        match registry_type {
+            RegistryType::Npm => config.registries.npm.enabled,
+            RegistryType::CratesIo => config.registries.crates.enabled,
+            RegistryType::GoProxy => config.registries.go_proxy.enabled,
+            RegistryType::GitHubActions => config.registries.github.enabled,
+        }
+    }
+
+    /// Update configuration from a JSON value
+    fn update_config(&self, value: serde_json::Value) {
+        match serde_json::from_value::<LspConfig>(value) {
+            Ok(new_config) => {
+                info!("Configuration updated: {:?}", new_config);
+                let mut config = self.config.write().unwrap();
+                *config = new_config;
+            }
+            Err(e) => {
+                warn!("Failed to parse configuration: {}", e);
+            }
         }
     }
 
@@ -187,6 +216,15 @@ impl<S: VersionStorer> Backend<S> {
             return;
         };
 
+        // Skip if registry is disabled
+        if !self.is_registry_enabled(parser_type) {
+            debug!(
+                "Registry {:?} is disabled, skipping diagnostics",
+                parser_type
+            );
+            return;
+        }
+
         let Some(parser) = self.parsers.get(&parser_type) else {
             return;
         };
@@ -278,7 +316,20 @@ impl<S: VersionStorer> LanguageServer for Backend<S> {
         self.client
             .log_message(MessageType::INFO, "LSP server initialized")
             .await;
+
         self.spawn_background_refresh();
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        debug!("Configuration changed: {:?}", params.settings);
+
+        // Try to extract version-lsp config from settings
+        if let Some(config_value) = params.settings.get("version-lsp") {
+            self.update_config(config_value.clone());
+        } else {
+            // Some clients send the config directly without the section wrapper
+            self.update_config(params.settings);
+        }
     }
 
     async fn shutdown(&self) -> Result<()> {

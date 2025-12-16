@@ -1,7 +1,56 @@
+use serde::Deserialize;
 use std::path::PathBuf;
 
 /// Default refresh interval in milliseconds (24 hours)
 pub const DEFAULT_REFRESH_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// LSP configuration structure
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LspConfig {
+    pub cache: CacheConfig,
+    pub registries: RegistriesConfig,
+}
+
+/// Cache-related configuration
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CacheConfig {
+    /// Cache refresh interval in milliseconds
+    pub refresh_interval: i64,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            refresh_interval: DEFAULT_REFRESH_INTERVAL_MS,
+        }
+    }
+}
+
+/// Registry-specific configuration
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct RegistriesConfig {
+    pub npm: RegistryConfig,
+    pub crates: RegistryConfig,
+    #[serde(rename = "goProxy")]
+    pub go_proxy: RegistryConfig,
+    pub github: RegistryConfig,
+}
+
+/// Individual registry configuration
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RegistryConfig {
+    pub enabled: bool,
+}
+
+impl Default for RegistryConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
 
 /// Returns the path to the data directory for version-lsp.
 /// Uses $XDG_DATA_HOME/version-lsp if XDG_DATA_HOME is set,
