@@ -2,4 +2,5 @@
 pub mod backend;
 pub mod diagnostics;
 pub mod refresh;
+pub mod resolver;
 pub mod server;

@@ -9,47 +9,29 @@ use tracing::{debug, error, info, warn};
 use crate::config::{LspConfig, data_dir, db_path};
 use crate::lsp::diagnostics::generate_diagnostics;
 use crate::lsp::refresh::{fetch_missing_packages, refresh_packages};
-use crate::parser::cargo_toml::CargoTomlParser;
-use crate::parser::github_actions::GitHubActionsParser;
-use crate::parser::go_mod::GoModParser;
-use crate::parser::package_json::PackageJsonParser;
-use crate::parser::traits::Parser;
+use crate::lsp::resolver::{PackageResolver, create_default_resolvers};
 use crate::parser::types::{RegistryType, detect_parser_type};
 use crate::version::cache::Cache;
 use crate::version::checker::VersionStorer;
-use crate::version::matcher::VersionMatcher;
-use crate::version::matchers::{
-    CratesVersionMatcher, GitHubActionsMatcher, GoVersionMatcher, NpmVersionMatcher,
-};
-use crate::version::registries::crates_io::CratesIoRegistry;
-use crate::version::registries::github::GitHubRegistry;
-use crate::version::registries::go_proxy::GoProxyRegistry;
-use crate::version::registries::npm::NpmRegistry;
 use crate::version::registry::Registry;
 
 pub struct Backend<S: VersionStorer> {
     client: Client,
     storer: Option<Arc<S>>,
     config: Arc<RwLock<LspConfig>>,
-    parsers: HashMap<RegistryType, Arc<dyn Parser>>,
-    matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>>,
-    registries: HashMap<RegistryType, Arc<dyn Registry>>,
+    resolvers: HashMap<RegistryType, PackageResolver>,
 }
 
 impl Backend<Cache> {
     pub fn new(client: Client) -> Self {
         let config = LspConfig::default();
         let storer = Self::initialize_storer(&config);
-        let parsers = Self::initialize_parsers();
-        let matchers = Self::initialize_matchers();
-        let registries = Self::initialize_registries();
+        let resolvers = create_default_resolvers();
         Self {
             client,
             storer,
             config: Arc::new(RwLock::new(config)),
-            parsers,
-            matchers,
-            registries,
+            resolvers,
         }
     }
 
@@ -77,19 +59,17 @@ impl Backend<Cache> {
 }
 
 impl<S: VersionStorer> Backend<S> {
-    /// Build a Backend with custom storer and registries
+    /// Build a Backend with custom storer and resolvers
     pub fn build(
         client: Client,
         storer: Arc<S>,
-        registries: HashMap<RegistryType, Arc<dyn Registry>>,
+        resolvers: HashMap<RegistryType, PackageResolver>,
     ) -> Self {
         Self {
             client,
             storer: Some(storer),
             config: Arc::new(RwLock::new(LspConfig::default())),
-            parsers: Self::initialize_parsers(),
-            matchers: Self::initialize_matchers(),
-            registries,
+            resolvers,
         }
     }
 
@@ -140,42 +120,6 @@ impl<S: VersionStorer> Backend<S> {
         });
     }
 
-    fn initialize_parsers() -> HashMap<RegistryType, Arc<dyn Parser>> {
-        let mut parsers: HashMap<RegistryType, Arc<dyn Parser>> = HashMap::new();
-        parsers.insert(
-            RegistryType::GitHubActions,
-            Arc::new(GitHubActionsParser::new()),
-        );
-        parsers.insert(RegistryType::Npm, Arc::new(PackageJsonParser::new()));
-        parsers.insert(RegistryType::CratesIo, Arc::new(CargoTomlParser::new()));
-        parsers.insert(RegistryType::GoProxy, Arc::new(GoModParser::new()));
-        parsers
-    }
-
-    fn initialize_matchers() -> HashMap<RegistryType, Arc<dyn VersionMatcher>> {
-        let mut matchers: HashMap<RegistryType, Arc<dyn VersionMatcher>> = HashMap::new();
-        matchers.insert(RegistryType::GitHubActions, Arc::new(GitHubActionsMatcher));
-        matchers.insert(RegistryType::Npm, Arc::new(NpmVersionMatcher));
-        matchers.insert(RegistryType::CratesIo, Arc::new(CratesVersionMatcher));
-        matchers.insert(RegistryType::GoProxy, Arc::new(GoVersionMatcher));
-        matchers
-    }
-
-    fn initialize_registries() -> HashMap<RegistryType, Arc<dyn Registry>> {
-        let mut registries: HashMap<RegistryType, Arc<dyn Registry>> = HashMap::new();
-        registries.insert(
-            RegistryType::GitHubActions,
-            Arc::new(GitHubRegistry::default()),
-        );
-        registries.insert(RegistryType::Npm, Arc::new(NpmRegistry::default()));
-        registries.insert(
-            RegistryType::CratesIo,
-            Arc::new(CratesIoRegistry::default()),
-        );
-        registries.insert(RegistryType::GoProxy, Arc::new(GoProxyRegistry::default()));
-        registries
-    }
-
     pub fn server_capabilities() -> ServerCapabilities {
         ServerCapabilities {
             text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -195,7 +139,12 @@ impl<S: VersionStorer> Backend<S> {
             return;
         };
 
-        let registries = self.registries.clone();
+        // Extract registries from resolvers for background task
+        let registries: HashMap<RegistryType, Arc<dyn Registry>> = self
+            .resolvers
+            .iter()
+            .map(|(k, v)| (*k, v.registry().clone()))
+            .collect();
 
         tokio::spawn(async move {
             let Some(packages) = storer
@@ -234,24 +183,20 @@ impl<S: VersionStorer> Backend<S> {
     async fn check_and_publish_diagnostics(&self, uri: Url, content: String) {
         let uri_str = uri.as_str();
 
-        let Some(parser_type) = detect_parser_type(uri_str) else {
+        let Some(registry_type) = detect_parser_type(uri_str) else {
             return;
         };
 
         // Skip if registry is disabled
-        if !self.is_registry_enabled(parser_type) {
+        if !self.is_registry_enabled(registry_type) {
             debug!(
                 "Registry {:?} is disabled, skipping diagnostics",
-                parser_type
+                registry_type
             );
             return;
         }
 
-        let Some(parser) = self.parsers.get(&parser_type) else {
-            return;
-        };
-
-        let Some(matcher) = self.matchers.get(&parser_type) else {
+        let Some(resolver) = self.resolvers.get(&registry_type) else {
             return;
         };
 
@@ -266,9 +211,14 @@ impl<S: VersionStorer> Backend<S> {
         };
 
         // Parse document to get packages (needed for on-demand fetch)
-        let packages = parser.parse(&content).unwrap_or_default();
+        let packages = resolver.parser().parse(&content).unwrap_or_default();
 
-        let diagnostics = generate_diagnostics(&**parser, &**matcher, &**storer, &content);
+        let diagnostics = generate_diagnostics(
+            &**resolver.parser(),
+            &**resolver.matcher(),
+            &**storer,
+            &content,
+        );
 
         self.client
             .log_message(
@@ -287,14 +237,11 @@ impl<S: VersionStorer> Backend<S> {
 
         // Spawn background task to fetch missing packages
         if !packages.is_empty() {
-            let Some(registry) = self.registries.get(&parser_type).cloned() else {
-                return;
-            };
-
+            let registry = resolver.registry().clone();
             let storer = storer.clone();
             let client = self.client.clone();
-            let parser = parser.clone();
-            let matcher = matcher.clone();
+            let parser = resolver.parser().clone();
+            let matcher = resolver.matcher().clone();
 
             tokio::spawn(async move {
                 let fetched = fetch_missing_packages(&*storer, &*registry, &packages).await;

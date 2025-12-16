@@ -18,10 +18,18 @@ use tower_lsp::jsonrpc::Request;
 use tower_lsp::lsp_types::*;
 
 use version_lsp::lsp::backend::Backend;
+use version_lsp::lsp::resolver::PackageResolver;
+use version_lsp::parser::cargo_toml::CargoTomlParser;
+use version_lsp::parser::github_actions::GitHubActionsParser;
+use version_lsp::parser::go_mod::GoModParser;
+use version_lsp::parser::package_json::PackageJsonParser;
 use version_lsp::parser::types::RegistryType;
 use version_lsp::version::cache::Cache;
 use version_lsp::version::checker::VersionStorer;
 use version_lsp::version::error::RegistryError;
+use version_lsp::version::matchers::{
+    CratesVersionMatcher, GitHubActionsMatcher, GoVersionMatcher, NpmVersionMatcher,
+};
 use version_lsp::version::registry::Registry;
 use version_lsp::version::types::PackageVersions;
 
@@ -62,6 +70,35 @@ impl Registry for MockRegistry {
             Some(versions) => Ok(PackageVersions::new(versions.clone())),
             None => Err(RegistryError::NotFound(package_name.to_string())),
         }
+    }
+}
+
+/// Create a test resolver for the given registry type with a mock registry
+fn create_test_resolver(
+    registry_type: RegistryType,
+    mock_registry: MockRegistry,
+) -> PackageResolver {
+    match registry_type {
+        RegistryType::GitHubActions => PackageResolver::new(
+            Arc::new(GitHubActionsParser::new()),
+            Arc::new(GitHubActionsMatcher),
+            Arc::new(mock_registry),
+        ),
+        RegistryType::Npm => PackageResolver::new(
+            Arc::new(PackageJsonParser::new()),
+            Arc::new(NpmVersionMatcher),
+            Arc::new(mock_registry),
+        ),
+        RegistryType::CratesIo => PackageResolver::new(
+            Arc::new(CargoTomlParser::new()),
+            Arc::new(CratesVersionMatcher),
+            Arc::new(mock_registry),
+        ),
+        RegistryType::GoProxy => PackageResolver::new(
+            Arc::new(GoModParser::new()),
+            Arc::new(GoVersionMatcher),
+            Arc::new(mock_registry),
+        ),
     }
 }
 
@@ -176,16 +213,18 @@ async fn e2e_did_open_publishes_outdated_version_warning() {
         &[("actions/checkout", vec!["2.0.0", "3.0.0", "4.0.0"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::GitHubActions)
         .with_versions("actions/checkout", vec!["2.0.0", "3.0.0", "4.0.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::GitHubActions, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::GitHubActions,
+        create_test_resolver(RegistryType::GitHubActions, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     // Start notification collector immediately
     let mut notification_rx = spawn_notification_collector(socket);
@@ -246,16 +285,18 @@ async fn e2e_did_open_no_diagnostics_for_latest_version() {
         &[("actions/checkout", vec!["3.0.0", "4.0.0"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::GitHubActions)
         .with_versions("actions/checkout", vec!["3.0.0", "4.0.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::GitHubActions, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::GitHubActions,
+        create_test_resolver(RegistryType::GitHubActions, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     // Start notification collector immediately
     let mut notification_rx = spawn_notification_collector(socket);
@@ -304,16 +345,18 @@ async fn e2e_did_open_publishes_error_for_nonexistent_version() {
         &[("actions/checkout", vec!["3.0.0", "4.0.0"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::GitHubActions)
         .with_versions("actions/checkout", vec!["3.0.0", "4.0.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::GitHubActions, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::GitHubActions,
+        create_test_resolver(RegistryType::GitHubActions, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     // Start notification collector immediately
     let mut notification_rx = spawn_notification_collector(socket);
@@ -370,16 +413,18 @@ async fn e2e_did_change_publishes_diagnostics_on_version_update() {
         &[("actions/checkout", vec!["2.0.0", "3.0.0", "4.0.0"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::GitHubActions)
         .with_versions("actions/checkout", vec!["2.0.0", "3.0.0", "4.0.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::GitHubActions, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::GitHubActions,
+        create_test_resolver(RegistryType::GitHubActions, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     // Start notification collector immediately
     let mut notification_rx = spawn_notification_collector(socket);
@@ -465,16 +510,18 @@ async fn e2e_package_json_publishes_outdated_version_warning() {
         &[("lodash", vec!["4.17.19", "4.17.20", "4.17.21"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::Npm)
         .with_versions("lodash", vec!["4.17.19", "4.17.20", "4.17.21"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::Npm, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::Npm,
+        create_test_resolver(RegistryType::Npm, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -526,16 +573,18 @@ async fn e2e_package_json_no_diagnostics_for_latest_version() {
     let (_temp_dir, cache) =
         create_test_cache(RegistryType::Npm, &[("lodash", vec!["4.17.20", "4.17.21"])]);
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry =
         MockRegistry::new(RegistryType::Npm).with_versions("lodash", vec!["4.17.20", "4.17.21"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::Npm, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::Npm,
+        create_test_resolver(RegistryType::Npm, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -578,16 +627,18 @@ async fn e2e_package_json_publishes_error_for_nonexistent_version() {
     let (_temp_dir, cache) =
         create_test_cache(RegistryType::Npm, &[("lodash", vec!["4.17.20", "4.17.21"])]);
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry =
         MockRegistry::new(RegistryType::Npm).with_versions("lodash", vec!["4.17.20", "4.17.21"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::Npm, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::Npm,
+        create_test_resolver(RegistryType::Npm, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -641,16 +692,18 @@ async fn e2e_package_json_caret_range_is_latest_when_satisfied() {
         &[("lodash", vec!["4.17.0", "4.17.20", "4.17.21"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::Npm)
         .with_versions("lodash", vec!["4.17.0", "4.17.20", "4.17.21"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::Npm, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::Npm,
+        create_test_resolver(RegistryType::Npm, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -701,16 +754,18 @@ async fn e2e_cargo_toml_publishes_outdated_version_warning() {
         &[("serde", vec!["1.0.0", "1.0.100", "1.1.0"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::CratesIo)
         .with_versions("serde", vec!["1.0.0", "1.0.100", "1.1.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::CratesIo, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::CratesIo,
+        create_test_resolver(RegistryType::CratesIo, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -765,16 +820,18 @@ async fn e2e_cargo_toml_no_diagnostics_for_latest_version() {
         &[("serde", vec!["1.0.100", "1.0.200"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::CratesIo)
         .with_versions("serde", vec!["1.0.100", "1.0.200"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::CratesIo, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::CratesIo,
+        create_test_resolver(RegistryType::CratesIo, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -820,16 +877,18 @@ async fn e2e_cargo_toml_publishes_error_for_nonexistent_version() {
         &[("serde", vec!["1.0.100", "1.0.200"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::CratesIo)
         .with_versions("serde", vec!["1.0.100", "1.0.200"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::CratesIo, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::CratesIo,
+        create_test_resolver(RegistryType::CratesIo, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -884,16 +943,18 @@ async fn e2e_cargo_toml_caret_range_is_latest_when_satisfied() {
         &[("serde", vec!["1.0.0", "1.0.100", "1.0.200"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::CratesIo)
         .with_versions("serde", vec!["1.0.0", "1.0.100", "1.0.200"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::CratesIo, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::CratesIo,
+        create_test_resolver(RegistryType::CratesIo, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -941,16 +1002,18 @@ async fn e2e_cargo_toml_workspace_dependencies_outdated_warning() {
         &[("prost", vec!["0.12.0", "0.13.0", "0.14.0", "0.14.1"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::CratesIo)
         .with_versions("prost", vec!["0.12.0", "0.13.0", "0.14.0", "0.14.1"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::CratesIo, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::CratesIo,
+        create_test_resolver(RegistryType::CratesIo, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -1008,16 +1071,18 @@ async fn e2e_go_mod_publishes_outdated_version_warning() {
         &[("golang.org/x/text", vec!["v0.12.0", "v0.13.0", "v0.14.0"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::GoProxy)
         .with_versions("golang.org/x/text", vec!["v0.12.0", "v0.13.0", "v0.14.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::GoProxy, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::GoProxy,
+        create_test_resolver(RegistryType::GoProxy, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -1068,16 +1133,18 @@ async fn e2e_go_mod_no_diagnostics_for_latest_version() {
         &[("golang.org/x/text", vec!["v0.13.0", "v0.14.0"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::GoProxy)
         .with_versions("golang.org/x/text", vec!["v0.13.0", "v0.14.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::GoProxy, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::GoProxy,
+        create_test_resolver(RegistryType::GoProxy, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -1119,16 +1186,18 @@ async fn e2e_go_mod_publishes_error_for_nonexistent_version() {
         &[("golang.org/x/text", vec!["v0.13.0", "v0.14.0"])],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::GoProxy)
         .with_versions("golang.org/x/text", vec!["v0.13.0", "v0.14.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::GoProxy, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::GoProxy,
+        create_test_resolver(RegistryType::GoProxy, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
@@ -1181,17 +1250,19 @@ async fn e2e_go_mod_require_block_publishes_outdated_version_warning() {
         ],
     );
 
-    // 2. Setup mock Registry
+    // 2. Setup mock Registry and resolver
     let registry = MockRegistry::new(RegistryType::GoProxy)
         .with_versions("golang.org/x/text", vec!["v0.12.0", "v0.14.0"])
         .with_versions("golang.org/x/net", vec!["v0.19.0", "v0.20.0"]);
 
-    let registries: HashMap<RegistryType, Arc<dyn Registry>> =
-        HashMap::from([(RegistryType::GoProxy, Arc::new(registry) as _)]);
+    let resolvers: HashMap<RegistryType, PackageResolver> = HashMap::from([(
+        RegistryType::GoProxy,
+        create_test_resolver(RegistryType::GoProxy, registry),
+    )]);
 
     // 3. Create LspService
     let (mut service, socket) =
-        LspService::build(|client| Backend::build(client, cache.clone(), registries)).finish();
+        LspService::build(|client| Backend::build(client, cache.clone(), resolvers)).finish();
 
     let mut notification_rx = spawn_notification_collector(socket);
 
