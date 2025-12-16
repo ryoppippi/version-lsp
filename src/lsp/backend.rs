@@ -95,7 +95,7 @@ impl<S: VersionStorer> Backend<S> {
 
     /// Check if a registry is enabled in the configuration
     fn is_registry_enabled(&self, registry_type: RegistryType) -> bool {
-        let config = self.config.read().unwrap();
+        let config = self.config.read().expect("config lock poisoned");
         match registry_type {
             RegistryType::Npm => config.registries.npm.enabled,
             RegistryType::CratesIo => config.registries.crates.enabled,
@@ -105,15 +105,19 @@ impl<S: VersionStorer> Backend<S> {
     }
 
     /// Update configuration from a JSON value
-    fn update_config(&self, value: serde_json::Value) {
+    /// Returns error message if parsing fails
+    fn update_config(&self, value: serde_json::Value) -> Option<String> {
         match serde_json::from_value::<LspConfig>(value) {
             Ok(new_config) => {
                 info!("Configuration updated: {:?}", new_config);
-                let mut config = self.config.write().unwrap();
+                let mut config = self.config.write().expect("config lock poisoned");
                 *config = new_config;
+                None
             }
             Err(e) => {
-                warn!("Failed to parse configuration: {}", e);
+                let msg = format!("Failed to parse configuration: {}", e);
+                warn!("{}", msg);
+                Some(msg)
             }
         }
     }
@@ -235,9 +239,9 @@ impl<S: VersionStorer> Backend<S> {
 
         let Some(storer) = &self.storer else {
             self.client
-                .log_message(
+                .show_message(
                     MessageType::WARNING,
-                    "Storer not available, skipping diagnostics",
+                    "Cache not available, version checking disabled",
                 )
                 .await;
             return;
@@ -324,11 +328,16 @@ impl<S: VersionStorer> LanguageServer for Backend<S> {
         debug!("Configuration changed: {:?}", params.settings);
 
         // Try to extract version-lsp config from settings
-        if let Some(config_value) = params.settings.get("version-lsp") {
-            self.update_config(config_value.clone());
+        let error_msg = if let Some(config_value) = params.settings.get("version-lsp") {
+            self.update_config(config_value.clone())
         } else {
             // Some clients send the config directly without the section wrapper
-            self.update_config(params.settings);
+            self.update_config(params.settings)
+        };
+
+        // Notify client of configuration error via window/showMessage
+        if let Some(msg) = error_msg {
+            self.client.show_message(MessageType::ERROR, msg).await;
         }
     }
 

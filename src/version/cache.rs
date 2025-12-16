@@ -49,7 +49,7 @@ impl Cache {
     fn create_schema(&self) -> Result<(), CacheError> {
         debug!("Creating database schema");
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
 
         conn.execute(
             r#"
@@ -130,7 +130,7 @@ impl Cache {
         registry_type: &str,
         package_name: &str,
     ) -> Result<Vec<String>, CacheError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT v.version FROM versions v
@@ -157,13 +157,13 @@ impl Cache {
             return Ok(());
         }
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("db lock poisoned");
         let tx = conn.transaction()?;
 
         // Get or create package
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before UNIX epoch")
             .as_millis() as i64;
 
         tx.execute(
@@ -204,7 +204,7 @@ impl Cache {
         package_name: &str,
         tag_name: &str,
     ) -> Result<Option<String>, CacheError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
         let result = conn.query_row(
             r#"
             SELECT dt.version FROM dist_tags dt
@@ -230,7 +230,7 @@ impl VersionStorer for Cache {
         package_name: &str,
     ) -> Result<Option<String>, CacheError> {
         let registry_type = registry_type.as_str();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
 
         // First, try to get the "latest" dist-tag (for npm packages)
         let dist_tag_result = conn.query_row(
@@ -282,7 +282,7 @@ impl VersionStorer for Cache {
         version: &str,
     ) -> Result<bool, CacheError> {
         let registry_type = registry_type.as_str();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
         let exists: bool = conn.query_row(
             r#"
             SELECT EXISTS(
@@ -314,10 +314,10 @@ impl VersionStorer for Cache {
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before UNIX epoch")
             .as_millis() as i64;
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("db lock poisoned");
         let tx = conn.transaction()?;
 
         // Insert or update package
@@ -361,12 +361,12 @@ impl VersionStorer for Cache {
     fn get_packages_needing_refresh(&self) -> Result<Vec<PackageId>, CacheError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before UNIX epoch")
             .as_millis() as i64;
 
         let threshold = now - self.refresh_interval;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
         let mut stmt =
             conn.prepare("SELECT registry_type, package_name FROM packages WHERE updated_at < ?1")?;
 
@@ -400,12 +400,12 @@ impl VersionStorer for Cache {
         let registry_type = registry_type.as_str();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before UNIX epoch")
             .as_millis() as i64;
 
         let timeout_threshold = now - Cache::FETCH_TIMEOUT_MS;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
 
         // Try to set fetching_since if:
         // 1. Package doesn't exist (will be created by replace_versions later)
@@ -442,7 +442,7 @@ impl VersionStorer for Cache {
         package_name: &str,
     ) -> Result<(), CacheError> {
         let registry_type = registry_type.as_str();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
 
         conn.execute(
             "UPDATE packages SET fetching_since = NULL WHERE registry_type = ?1 AND package_name = ?2",
@@ -480,7 +480,7 @@ impl VersionStorer for Cache {
         }
 
         let registry_type = registry_type.as_str();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db lock poisoned");
 
         // Build WHERE IN clause with placeholders
         let placeholders: Vec<_> = (0..package_names.len())
