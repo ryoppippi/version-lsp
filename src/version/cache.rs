@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
 use tracing::{debug, info};
@@ -46,10 +46,15 @@ impl Cache {
     /// Timeout for fetch operations in milliseconds (30 seconds)
     const FETCH_TIMEOUT_MS: i64 = 30_000;
 
+    /// Acquire database connection lock with proper error handling
+    fn lock_conn(&self) -> Result<MutexGuard<'_, Connection>, CacheError> {
+        self.conn.lock().map_err(|_| CacheError::LockPoisoned)
+    }
+
     fn create_schema(&self) -> Result<(), CacheError> {
         debug!("Creating database schema");
 
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
 
         conn.execute(
             r#"
@@ -130,7 +135,7 @@ impl Cache {
         registry_type: &str,
         package_name: &str,
     ) -> Result<Vec<String>, CacheError> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             r#"
             SELECT v.version FROM versions v
@@ -157,7 +162,7 @@ impl Cache {
             return Ok(());
         }
 
-        let mut conn = self.conn.lock().expect("db lock poisoned");
+        let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
 
         // Get or create package
@@ -204,7 +209,7 @@ impl Cache {
         package_name: &str,
         tag_name: &str,
     ) -> Result<Option<String>, CacheError> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let result = conn.query_row(
             r#"
             SELECT dt.version FROM dist_tags dt
@@ -230,7 +235,7 @@ impl VersionStorer for Cache {
         package_name: &str,
     ) -> Result<Option<String>, CacheError> {
         let registry_type = registry_type.as_str();
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
 
         // First, try to get the "latest" dist-tag (for npm packages)
         let dist_tag_result = conn.query_row(
@@ -282,7 +287,7 @@ impl VersionStorer for Cache {
         version: &str,
     ) -> Result<bool, CacheError> {
         let registry_type = registry_type.as_str();
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let exists: bool = conn.query_row(
             r#"
             SELECT EXISTS(
@@ -317,7 +322,7 @@ impl VersionStorer for Cache {
             .expect("system time before UNIX epoch")
             .as_millis() as i64;
 
-        let mut conn = self.conn.lock().expect("db lock poisoned");
+        let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
 
         // Insert or update package
@@ -366,7 +371,7 @@ impl VersionStorer for Cache {
 
         let threshold = now - self.refresh_interval;
 
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt =
             conn.prepare("SELECT registry_type, package_name FROM packages WHERE updated_at < ?1")?;
 
@@ -405,7 +410,7 @@ impl VersionStorer for Cache {
 
         let timeout_threshold = now - Cache::FETCH_TIMEOUT_MS;
 
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
 
         // Try to set fetching_since if:
         // 1. Package doesn't exist (will be created by replace_versions later)
@@ -442,7 +447,7 @@ impl VersionStorer for Cache {
         package_name: &str,
     ) -> Result<(), CacheError> {
         let registry_type = registry_type.as_str();
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
 
         conn.execute(
             "UPDATE packages SET fetching_since = NULL WHERE registry_type = ?1 AND package_name = ?2",
@@ -480,7 +485,7 @@ impl VersionStorer for Cache {
         }
 
         let registry_type = registry_type.as_str();
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
 
         // Build WHERE IN clause with placeholders
         let placeholders: Vec<_> = (0..package_names.len())

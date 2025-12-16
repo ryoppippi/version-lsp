@@ -4,6 +4,9 @@ use thiserror::Error;
 pub enum CacheError {
     #[error("Database error: {0}")]
     Database(#[from] rusqlite::Error),
+
+    #[error("Database lock poisoned")]
+    LockPoisoned,
 }
 
 #[derive(Debug, Error)]
