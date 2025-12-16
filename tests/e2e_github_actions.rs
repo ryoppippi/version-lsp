@@ -5,13 +5,13 @@ mod helper;
 use std::collections::HashMap;
 
 use tower::Service;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LspService;
+use tower_lsp::lsp_types::*;
 
 use helper::{
-    create_did_change_notification, create_did_open_notification, create_initialize_request,
-    create_initialized_notification, create_test_cache, create_test_resolver, MockRegistry,
-    spawn_notification_collector, wait_for_notification,
+    MockRegistry, create_did_change_notification, create_did_open_notification,
+    create_initialize_request, create_initialized_notification, create_test_cache,
+    create_test_resolver, spawn_notification_collector, wait_for_notification,
 };
 use version_lsp::lsp::backend::Backend;
 use version_lsp::lsp::resolver::PackageResolver;

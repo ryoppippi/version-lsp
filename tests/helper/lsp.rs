@@ -5,9 +5,9 @@ use std::time::Duration;
 use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use tower_lsp::ClientSocket;
 use tower_lsp::jsonrpc::Request;
 use tower_lsp::lsp_types::*;
-use tower_lsp::ClientSocket;
 
 /// Create an LSP initialize request
 pub fn create_initialize_request(id: i64) -> Request {
