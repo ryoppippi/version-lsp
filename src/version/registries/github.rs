@@ -4,6 +4,7 @@ use crate::parser::types::RegistryType;
 use crate::version::error::RegistryError;
 use crate::version::registry::Registry;
 use crate::version::types::PackageVersions;
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tracing::warn;
 
@@ -14,6 +15,7 @@ const DEFAULT_BASE_URL: &str = "https://api.github.com";
 #[derive(Debug, Deserialize)]
 struct Release {
     tag_name: String,
+    published_at: Option<String>,
 }
 
 /// Registry implementation for GitHub Releases API
@@ -90,7 +92,25 @@ impl Registry for GitHubRegistry {
             RegistryError::InvalidResponse(e.to_string())
         })?;
 
-        let versions = releases.into_iter().map(|r| r.tag_name).collect();
+        // Sort releases by published_at (oldest first, newest last)
+        // Releases without published_at are placed at the beginning
+        let mut releases_with_dates: Vec<(String, Option<DateTime<Utc>>)> = releases
+            .into_iter()
+            .map(|r| {
+                let timestamp = r
+                    .published_at
+                    .and_then(|ts| DateTime::parse_from_rfc3339(&ts).ok())
+                    .map(|dt| dt.with_timezone(&Utc));
+                (r.tag_name, timestamp)
+            })
+            .collect();
+
+        releases_with_dates.sort_by(|(_, a), (_, b)| a.cmp(b));
+
+        let versions = releases_with_dates
+            .into_iter()
+            .map(|(tag, _)| tag)
+            .collect();
 
         Ok(PackageVersions::new(versions))
     }
@@ -102,9 +122,11 @@ mod tests {
     use mockito::Server;
 
     #[tokio::test]
-    async fn fetch_all_versions_returns_releases_sorted_by_newest() {
+    async fn fetch_all_versions_returns_releases_sorted_by_published_at() {
         let mut server = Server::new_async().await;
 
+        // GitHub API returns releases in descending order (newest first)
+        // But we need them sorted oldest first, newest last
         let mock = server
             .mock("GET", "/repos/actions/checkout/releases")
             .with_status(200)
@@ -126,12 +148,13 @@ mod tests {
             .unwrap();
 
         mock.assert_async().await;
+        // Should be sorted oldest first, newest last
         assert_eq!(
             result.versions,
             vec![
-                "v4.1.0".to_string(),
+                "v3.6.0".to_string(),
                 "v4.0.0".to_string(),
-                "v3.6.0".to_string()
+                "v4.1.0".to_string()
             ]
         );
     }
