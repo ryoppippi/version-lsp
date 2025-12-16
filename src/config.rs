@@ -1,8 +1,18 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
+// =============================================================================
+// Time-related constants
+// =============================================================================
+
 /// Default refresh interval in milliseconds (24 hours)
 pub const DEFAULT_REFRESH_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Timeout for fetch operations in milliseconds (30 seconds)
+pub const FETCH_TIMEOUT_MS: i64 = 30_000;
+
+/// Delay between starting each fetch request to avoid rate limiting (10ms)
+pub const FETCH_STAGGER_DELAY_MS: u64 = 10;
 
 /// LSP configuration structure
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]

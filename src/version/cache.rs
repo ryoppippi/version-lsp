@@ -5,6 +5,7 @@ use std::sync::{Mutex, MutexGuard};
 use rusqlite::Connection;
 use tracing::{debug, info};
 
+use crate::config::FETCH_TIMEOUT_MS;
 use crate::parser::types::RegistryType;
 use crate::version::checker::VersionStorer;
 use crate::version::error::CacheError;
@@ -42,9 +43,6 @@ impl Cache {
 
         Ok(cache)
     }
-
-    /// Timeout for fetch operations in milliseconds (30 seconds)
-    const FETCH_TIMEOUT_MS: i64 = 30_000;
 
     /// Acquire database connection lock with proper error handling
     fn lock_conn(&self) -> Result<MutexGuard<'_, Connection>, CacheError> {
@@ -400,7 +398,7 @@ impl VersionStorer for Cache {
     ) -> Result<bool, CacheError> {
         let registry_type = registry_type.as_str();
         let now = Self::current_timestamp_ms();
-        let timeout_threshold = now - Self::FETCH_TIMEOUT_MS;
+        let timeout_threshold = now - FETCH_TIMEOUT_MS;
 
         let conn = self.lock_conn()?;
 

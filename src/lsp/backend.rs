@@ -211,7 +211,11 @@ impl<S: VersionStorer> Backend<S> {
         };
 
         // Parse document to get packages (needed for on-demand fetch)
-        let packages = resolver.parser().parse(&content).unwrap_or_default();
+        let packages = resolver
+            .parser()
+            .parse(&content)
+            .inspect_err(|e| warn!("Failed to parse {}: {}", uri_str, e))
+            .unwrap_or_default();
 
         let diagnostics = generate_diagnostics(
             &**resolver.parser(),

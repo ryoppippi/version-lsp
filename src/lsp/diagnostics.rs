@@ -1,6 +1,7 @@
 //! Diagnostics generation for version checking results
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use tracing::warn;
 
 use crate::parser::traits::Parser;
 use crate::parser::types::PackageInfo;
@@ -18,7 +19,10 @@ pub fn generate_diagnostics<S: VersionStorer>(
     storer: &S,
     content: &str,
 ) -> Vec<Diagnostic> {
-    let packages = parser.parse(content).unwrap_or_default();
+    let packages = parser
+        .parse(content)
+        .inspect_err(|e| warn!("Failed to parse document: {}", e))
+        .unwrap_or_default();
 
     packages
         .iter()

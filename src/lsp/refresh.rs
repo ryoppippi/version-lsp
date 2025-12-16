@@ -6,13 +6,11 @@ use futures::future::join_all;
 use tokio::time::sleep;
 use tracing::{error, info};
 
+use crate::config::FETCH_STAGGER_DELAY_MS;
 use crate::parser::types::{PackageInfo, RegistryType};
 use crate::version::cache::PackageId;
 use crate::version::checker::VersionStorer;
 use crate::version::registry::Registry;
-
-/// Delay between starting each fetch request to avoid rate limiting
-const FETCH_STAGGER_DELAY_MS: u64 = 10;
 
 /// Fetch and cache a single package's versions
 ///
