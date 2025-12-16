@@ -9,9 +9,10 @@
 
 ## High
 
-- [ ] 2. fetch処理のコード重複を解消
+- [x] 2. fetch処理のコード重複を解消
   - 場所: `src/lsp/refresh.rs`
   - 問題: `refresh_packages()` と `fetch_missing_packages()` で約70%重複
+  - 対応: `fetch_and_cache_package()` ヘルパー関数を抽出（約90行削減）
 
 - [ ] 3. 時刻計算の重複を解消
   - 場所: `src/version/cache.rs` (4箇所)

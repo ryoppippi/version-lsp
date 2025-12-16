@@ -6,13 +6,108 @@ use futures::future::join_all;
 use tokio::time::sleep;
 use tracing::{error, info};
 
-use crate::parser::types::PackageInfo;
+use crate::parser::types::{PackageInfo, RegistryType};
 use crate::version::cache::PackageId;
 use crate::version::checker::VersionStorer;
 use crate::version::registry::Registry;
 
 /// Delay between starting each fetch request to avoid rate limiting
 const FETCH_STAGGER_DELAY_MS: u64 = 10;
+
+/// Fetch and cache a single package's versions
+///
+/// Handles:
+/// - Acquiring fetch lock (prevents duplicate fetches)
+/// - Fetching versions from registry
+/// - Saving versions and dist tags to cache
+/// - Releasing fetch lock
+///
+/// Returns true if the package was successfully fetched and cached.
+async fn fetch_and_cache_package<S: VersionStorer>(
+    storer: &S,
+    registry: &dyn Registry,
+    registry_type: RegistryType,
+    package_name: &str,
+) -> bool {
+    let registry_type_str = registry_type.as_str();
+
+    // Try to acquire fetch lock (returns false if another process is fetching)
+    let can_fetch = storer
+        .try_start_fetch(registry_type, package_name)
+        .inspect_err(|e| {
+            error!(
+                "Failed to start fetch for {}/{}: {}",
+                registry_type_str, package_name, e
+            )
+        })
+        .unwrap_or(false);
+
+    if !can_fetch {
+        info!(
+            "Skipping {}/{}: already being fetched by another process",
+            registry_type_str, package_name
+        );
+        return false;
+    }
+
+    let success = match registry.fetch_all_versions(package_name).await {
+        Ok(pkg_versions) => {
+            let version_count = pkg_versions.versions.len();
+            let save_result =
+                storer.replace_versions(registry_type, package_name, pkg_versions.versions);
+
+            if save_result
+                .inspect_err(|e| {
+                    error!(
+                        "Failed to save versions for {}/{}: {}",
+                        registry_type_str, package_name, e
+                    );
+                })
+                .is_ok()
+            {
+                info!(
+                    "Saved {} versions for {}/{}",
+                    version_count, registry_type_str, package_name
+                );
+
+                // Save dist tags if available
+                if !pkg_versions.dist_tags.is_empty() {
+                    let _ = storer
+                        .save_dist_tags(registry_type, package_name, &pkg_versions.dist_tags)
+                        .inspect_err(|e| {
+                            error!(
+                                "Failed to save dist tags for {}/{}: {}",
+                                registry_type_str, package_name, e
+                            );
+                        });
+                }
+
+                true
+            } else {
+                false
+            }
+        }
+        Err(e) => {
+            error!(
+                "Failed to fetch versions for {}/{}: {}",
+                registry_type_str, package_name, e
+            );
+            false
+        }
+    };
+
+    // Release fetch lock (always call regardless of success/failure)
+    let _ = storer
+        .finish_fetch(registry_type, package_name)
+        .inspect_err(|e| {
+            error!(
+                "Failed to finish fetch for {}/{}: {}",
+                registry_type_str, package_name, e
+            )
+        });
+
+    success
+}
 
 /// Refresh versions for packages that need updating
 ///
@@ -25,92 +120,20 @@ pub async fn refresh_packages<S: VersionStorer>(
     registry: &dyn Registry,
     packages: Vec<PackageId>,
 ) {
-    // Create futures for all packages with staggered delays
     let futures = packages.into_iter().enumerate().map(|(i, package)| {
         let delay = Duration::from_millis(FETCH_STAGGER_DELAY_MS * i as u64);
         async move {
-            // Staggered delay to avoid rate limiting
             sleep(delay).await;
-
-            let registry_type_str = package.registry_type.as_str();
-
-            // Try to acquire fetch lock (returns false if another process is fetching)
-            let can_fetch = storer
-                .try_start_fetch(package.registry_type, &package.package_name)
-                .inspect_err(|e| {
-                    error!(
-                        "Failed to start fetch for {}/{}: {}",
-                        registry_type_str, package.package_name, e
-                    )
-                })
-                .unwrap_or(false);
-
-            if !can_fetch {
-                info!(
-                    "Skipping {}/{}: already being fetched by another process",
-                    registry_type_str, package.package_name
-                );
-                return;
-            }
-
-            let result = registry.fetch_all_versions(&package.package_name).await;
-
-            match result {
-                Ok(pkg_versions) => {
-                    let version_count = pkg_versions.versions.len();
-                    let save_result = storer.replace_versions(
-                        package.registry_type,
-                        &package.package_name,
-                        pkg_versions.versions,
-                    );
-                    if let Err(e) = save_result {
-                        error!(
-                            "Failed to save versions for {}/{}: {}",
-                            registry_type_str, package.package_name, e
-                        );
-                    } else {
-                        info!(
-                            "Saved {} versions for {}/{}",
-                            version_count, registry_type_str, package.package_name
-                        );
-                    }
-
-                    // Save dist tags if available
-                    if !pkg_versions.dist_tags.is_empty() {
-                        let dist_tags_result = storer.save_dist_tags(
-                            package.registry_type,
-                            &package.package_name,
-                            &pkg_versions.dist_tags,
-                        );
-                        if let Err(e) = dist_tags_result {
-                            error!(
-                                "Failed to save dist tags for {}/{}: {}",
-                                registry_type_str, package.package_name, e
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to fetch versions for {}/{}: {}",
-                        registry_type_str, package.package_name, e
-                    );
-                }
-            }
-
-            // Release fetch lock (always call regardless of success/failure)
-            let _ = storer
-                .finish_fetch(package.registry_type, &package.package_name)
-                .inspect_err(|e| {
-                    error!(
-                        "Failed to finish fetch for {}/{}: {}",
-                        registry_type_str, package.package_name, e
-                    )
-                });
+            fetch_and_cache_package(
+                storer,
+                registry,
+                package.registry_type,
+                &package.package_name,
+            )
+            .await;
         }
     });
 
-    // Execute all fetches concurrently
     join_all(futures).await;
 }
 
@@ -154,112 +177,26 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
         return Vec::new();
     }
 
-    // Create futures for all packages with staggered delays
     let futures = packages_to_fetch
         .into_iter()
         .enumerate()
         .map(|(i, package)| {
             let delay = Duration::from_millis(FETCH_STAGGER_DELAY_MS * i as u64);
+            let package_name = package.name.clone();
             async move {
-                // Staggered delay to avoid rate limiting
                 sleep(delay).await;
-
-                let registry_type_str = package.registry_type.as_str();
-
-                // Try to acquire fetch lock (returns false if another process is fetching)
-                let can_fetch = storer
-                    .try_start_fetch(package.registry_type, &package.name)
-                    .inspect_err(|e| {
-                        error!(
-                            "Failed to start fetch for {}/{}: {}",
-                            registry_type_str, package.name, e
-                        )
-                    })
-                    .unwrap_or(false);
-
-                if !can_fetch {
-                    info!(
-                        "Skipping {}/{}: already being fetched by another process",
-                        registry_type_str, package.name
-                    );
-                    return None;
-                }
-
                 info!(
                     "Fetching missing package {}/{} from registry",
-                    registry_type_str, package.name
+                    package.registry_type.as_str(),
+                    package.name
                 );
-
-                let result = registry.fetch_all_versions(&package.name).await;
-
-                let fetched_name = match result {
-                    Ok(pkg_versions) => {
-                        let version_count = pkg_versions.versions.len();
-                        let save_result = storer.replace_versions(
-                            package.registry_type,
-                            &package.name,
-                            pkg_versions.versions,
-                        );
-
-                        if save_result
-                            .inspect_err(|e| {
-                                error!(
-                                    "Failed to save versions for {}/{}: {}",
-                                    registry_type_str, package.name, e
-                                );
-                            })
-                            .is_ok()
-                        {
-                            info!(
-                                "Saved {} versions for {}/{}",
-                                version_count, registry_type_str, package.name
-                            );
-
-                            // Save dist tags if available
-                            if !pkg_versions.dist_tags.is_empty() {
-                                let _ = storer
-                                    .save_dist_tags(
-                                        package.registry_type,
-                                        &package.name,
-                                        &pkg_versions.dist_tags,
-                                    )
-                                    .inspect_err(|e| {
-                                        error!(
-                                            "Failed to save dist tags for {}/{}: {}",
-                                            registry_type_str, package.name, e
-                                        );
-                                    });
-                            }
-
-                            Some(package.name.clone())
-                        } else {
-                            None
-                        }
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to fetch versions for {}/{}: {}",
-                            registry_type_str, package.name, e
-                        );
-                        None
-                    }
-                };
-
-                // Release fetch lock (always call regardless of success/failure)
-                let _ = storer
-                    .finish_fetch(package.registry_type, &package.name)
-                    .inspect_err(|e| {
-                        error!(
-                            "Failed to finish fetch for {}/{}: {}",
-                            registry_type_str, package.name, e
-                        )
-                    });
-
-                fetched_name
+                let success =
+                    fetch_and_cache_package(storer, registry, package.registry_type, &package.name)
+                        .await;
+                if success { Some(package_name) } else { None }
             }
         });
 
-    // Execute all fetches concurrently and collect results
     join_all(futures).await.into_iter().flatten().collect()
 }
 
