@@ -1,6 +1,6 @@
 [package]
 name = "version-lsp"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["skanehira"]
 edition = "2024"
 
@@ -32,7 +32,7 @@ semver = "1.0"
 chrono = "0.4"
 
 # Database
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 
 # Error handling
 anyhow = "1.0"
