@@ -25,6 +25,7 @@ struct NpmPackageResponse {
 }
 
 /// Registry implementation for npm registry API
+#[derive(Clone)]
 pub struct NpmRegistry {
     client: reqwest::Client,
     base_url: String,

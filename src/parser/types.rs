@@ -11,6 +11,8 @@ pub enum RegistryType {
     CratesIo,
     /// Go proxy (go.mod)
     GoProxy,
+    /// pnpm catalog (pnpm-workspace.yaml)
+    PnpmCatalog,
 }
 
 impl RegistryType {
@@ -21,6 +23,7 @@ impl RegistryType {
             RegistryType::Npm => "npm",
             RegistryType::CratesIo => "crates_io",
             RegistryType::GoProxy => "go_proxy",
+            RegistryType::PnpmCatalog => "pnpm_catalog",
         }
     }
 }
@@ -34,6 +37,7 @@ impl std::str::FromStr for RegistryType {
             "npm" => Ok(RegistryType::Npm),
             "crates_io" => Ok(RegistryType::CratesIo),
             "go_proxy" => Ok(RegistryType::GoProxy),
+            "pnpm_catalog" => Ok(RegistryType::PnpmCatalog),
             _ => Err(()),
         }
     }
@@ -49,6 +53,8 @@ pub fn detect_parser_type(uri: &str) -> Option<RegistryType> {
         Some(RegistryType::CratesIo)
     } else if uri.ends_with("/go.mod") {
         Some(RegistryType::GoProxy)
+    } else if uri.ends_with("/pnpm-workspace.yaml") {
+        Some(RegistryType::PnpmCatalog)
     } else {
         None
     }
@@ -113,6 +119,12 @@ mod tests {
     #[case("/path/to/package.json", Some(RegistryType::Npm))]
     #[case("/path/to/Cargo.toml", Some(RegistryType::CratesIo))]
     #[case("/path/to/go.mod", Some(RegistryType::GoProxy))]
+    #[case("/path/to/pnpm-workspace.yaml", Some(RegistryType::PnpmCatalog))]
+    #[case("/project/pnpm-workspace.yaml", Some(RegistryType::PnpmCatalog))]
+    #[case(
+        "file:///home/user/pnpm-workspace.yaml",
+        Some(RegistryType::PnpmCatalog)
+    )]
     #[case("workflow.yml", None)]
     #[case("random.txt", None)]
     fn detect_parser_type_returns_expected(

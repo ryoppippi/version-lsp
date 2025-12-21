@@ -11,12 +11,14 @@ use version_lsp::parser::cargo_toml::CargoTomlParser;
 use version_lsp::parser::github_actions::GitHubActionsParser;
 use version_lsp::parser::go_mod::GoModParser;
 use version_lsp::parser::package_json::PackageJsonParser;
+use version_lsp::parser::pnpm_workspace::PnpmWorkspaceParser;
 use version_lsp::parser::types::RegistryType;
 use version_lsp::version::cache::Cache;
 use version_lsp::version::checker::VersionStorer;
 use version_lsp::version::error::RegistryError;
 use version_lsp::version::matchers::{
     CratesVersionMatcher, GitHubActionsMatcher, GoVersionMatcher, NpmVersionMatcher,
+    PnpmCatalogMatcher,
 };
 use version_lsp::version::registry::Registry;
 use version_lsp::version::types::PackageVersions;
@@ -85,6 +87,11 @@ pub fn create_test_resolver(
         RegistryType::GoProxy => PackageResolver::new(
             Arc::new(GoModParser::new()),
             Arc::new(GoVersionMatcher),
+            Arc::new(mock_registry),
+        ),
+        RegistryType::PnpmCatalog => PackageResolver::new(
+            Arc::new(PnpmWorkspaceParser),
+            Arc::new(PnpmCatalogMatcher),
             Arc::new(mock_registry),
         ),
     }

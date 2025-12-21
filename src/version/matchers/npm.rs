@@ -299,41 +299,51 @@ impl VersionMatcher for NpmVersionMatcher {
     }
 
     fn version_exists(&self, version_spec: &str, available_versions: &[String]) -> bool {
-        let Some(spec) = VersionSpec::parse(version_spec) else {
-            return false;
-        };
-
-        available_versions.iter().any(|v| {
-            Version::parse(v)
-                .map(|ver| spec.satisfies(&ver))
-                .unwrap_or(false)
-        })
+        npm_version_exists(version_spec, available_versions)
     }
 
     fn compare_to_latest(&self, current_version: &str, latest_version: &str) -> CompareResult {
-        let Some(spec) = VersionSpec::parse(current_version) else {
-            return CompareResult::Invalid;
-        };
+        npm_compare_to_latest(current_version, latest_version)
+    }
+}
 
-        let Ok(latest) = Version::parse(latest_version) else {
-            return CompareResult::Invalid;
-        };
+/// Common implementation for npm version existence check
+pub(crate) fn npm_version_exists(version_spec: &str, available_versions: &[String]) -> bool {
+    let Some(spec) = VersionSpec::parse(version_spec) else {
+        return false;
+    };
 
-        // Check if latest is within the spec
-        if spec.satisfies(&latest) {
-            return CompareResult::Latest;
-        }
+    available_versions.iter().any(|v| {
+        Version::parse(v)
+            .map(|ver| spec.satisfies(&ver))
+            .unwrap_or(false)
+    })
+}
 
-        // For Any (*), if not satisfied (which can't happen), treat as Latest
-        let Some(base) = spec.base_version() else {
-            return CompareResult::Latest;
-        };
+/// Common implementation for npm version comparison
+pub(crate) fn npm_compare_to_latest(current_version: &str, latest_version: &str) -> CompareResult {
+    let Some(spec) = VersionSpec::parse(current_version) else {
+        return CompareResult::Invalid;
+    };
 
-        if base < latest {
-            CompareResult::Outdated
-        } else {
-            CompareResult::Newer
-        }
+    let Ok(latest) = Version::parse(latest_version) else {
+        return CompareResult::Invalid;
+    };
+
+    // Check if latest is within the spec
+    if spec.satisfies(&latest) {
+        return CompareResult::Latest;
+    }
+
+    // For Any (*), if not satisfied (which can't happen), treat as Latest
+    let Some(base) = spec.base_version() else {
+        return CompareResult::Latest;
+    };
+
+    if base < latest {
+        CompareResult::Outdated
+    } else {
+        CompareResult::Newer
     }
 }
 

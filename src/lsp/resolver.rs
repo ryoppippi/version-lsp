@@ -10,11 +10,13 @@ use crate::parser::cargo_toml::CargoTomlParser;
 use crate::parser::github_actions::GitHubActionsParser;
 use crate::parser::go_mod::GoModParser;
 use crate::parser::package_json::PackageJsonParser;
+use crate::parser::pnpm_workspace::PnpmWorkspaceParser;
 use crate::parser::traits::Parser;
 use crate::parser::types::RegistryType;
 use crate::version::matcher::VersionMatcher;
 use crate::version::matchers::{
     CratesVersionMatcher, GitHubActionsMatcher, GoVersionMatcher, NpmVersionMatcher,
+    PnpmCatalogMatcher,
 };
 use crate::version::registries::crates_io::CratesIoRegistry;
 use crate::version::registries::github::GitHubRegistry;
@@ -68,6 +70,7 @@ impl PackageResolver {
 /// Create the default set of package resolvers for all supported registry types
 pub fn create_default_resolvers() -> HashMap<RegistryType, PackageResolver> {
     let mut resolvers = HashMap::new();
+    let npm_restistry = NpmRegistry::default();
 
     resolvers.insert(
         RegistryType::GitHubActions,
@@ -83,7 +86,7 @@ pub fn create_default_resolvers() -> HashMap<RegistryType, PackageResolver> {
         PackageResolver::new(
             Arc::new(PackageJsonParser::new()),
             Arc::new(NpmVersionMatcher),
-            Arc::new(NpmRegistry::default()),
+            Arc::new(npm_restistry.clone()),
         ),
     );
 
@@ -102,6 +105,15 @@ pub fn create_default_resolvers() -> HashMap<RegistryType, PackageResolver> {
             Arc::new(GoModParser::new()),
             Arc::new(GoVersionMatcher),
             Arc::new(GoProxyRegistry::default()),
+        ),
+    );
+
+    resolvers.insert(
+        RegistryType::PnpmCatalog,
+        PackageResolver::new(
+            Arc::new(PnpmWorkspaceParser),
+            Arc::new(PnpmCatalogMatcher),
+            Arc::new(npm_restistry),
         ),
     );
 

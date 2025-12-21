@@ -81,6 +81,7 @@ impl<S: VersionStorer> Backend<S> {
             RegistryType::CratesIo => config.registries.crates.enabled,
             RegistryType::GoProxy => config.registries.go_proxy.enabled,
             RegistryType::GitHubActions => config.registries.github.enabled,
+            RegistryType::PnpmCatalog => config.registries.pnpm_catalog.enabled,
         }
     }
 

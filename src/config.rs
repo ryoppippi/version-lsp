@@ -47,6 +47,8 @@ pub struct RegistriesConfig {
     #[serde(rename = "goProxy")]
     pub go_proxy: RegistryConfig,
     pub github: RegistryConfig,
+    #[serde(rename = "pnpmCatalog")]
+    pub pnpm_catalog: RegistryConfig,
 }
 
 /// Individual registry configuration
