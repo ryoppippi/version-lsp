@@ -13,7 +13,7 @@ pub enum RegistryType {
     GoProxy,
     /// pnpm catalog (pnpm-workspace.yaml)
     PnpmCatalog,
-    /// JSR (deno.json)
+    /// JSR (deno.json, deno.jsonc)
     Jsr,
 }
 
@@ -59,7 +59,7 @@ pub fn detect_parser_type(uri: &str) -> Option<RegistryType> {
         Some(RegistryType::GoProxy)
     } else if uri.ends_with("/pnpm-workspace.yaml") {
         Some(RegistryType::PnpmCatalog)
-    } else if uri.ends_with("/deno.json") {
+    } else if uri.ends_with("/deno.json") || uri.ends_with("/deno.jsonc") {
         Some(RegistryType::Jsr)
     } else {
         None
@@ -134,6 +134,9 @@ mod tests {
     #[case("/path/to/deno.json", Some(RegistryType::Jsr))]
     #[case("/project/deno.json", Some(RegistryType::Jsr))]
     #[case("file:///home/user/deno.json", Some(RegistryType::Jsr))]
+    #[case("/path/to/deno.jsonc", Some(RegistryType::Jsr))]
+    #[case("/project/deno.jsonc", Some(RegistryType::Jsr))]
+    #[case("file:///home/user/deno.jsonc", Some(RegistryType::Jsr))]
     #[case("workflow.yml", None)]
     #[case("random.txt", None)]
     fn detect_parser_type_returns_expected(
