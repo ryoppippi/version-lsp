@@ -189,10 +189,13 @@ impl<S: VersionStorer> Backend<S> {
 
     async fn check_and_publish_diagnostics(&self, uri: Url, content: String) {
         let uri_str = uri.as_str();
+        debug!("Checking diagnostics for URI: {}", uri_str);
 
         let Some(registry_type) = detect_parser_type(uri_str) else {
+            debug!("No parser type detected for URI: {}", uri_str);
             return;
         };
+        debug!("Detected registry type: {:?}", registry_type);
 
         // Skip if registry is disabled
         if !self.is_registry_enabled(registry_type) {
@@ -204,6 +207,7 @@ impl<S: VersionStorer> Backend<S> {
         }
 
         let Some(resolver) = self.resolvers.get(&registry_type) else {
+            debug!("No resolver found for registry type: {:?}", registry_type);
             return;
         };
 
@@ -223,6 +227,7 @@ impl<S: VersionStorer> Backend<S> {
             .parse(&content)
             .inspect_err(|e| warn!("Failed to parse {}: {}", uri_str, e))
             .unwrap_or_default();
+        debug!("Parsed {} packages: {:?}", packages.len(), packages);
 
         let diagnostics = generate_diagnostics(
             &**resolver.parser(),
@@ -248,6 +253,7 @@ impl<S: VersionStorer> Backend<S> {
 
         // Spawn background task to fetch missing packages
         if !packages.is_empty() {
+            debug!("Spawning background task to fetch {} packages", packages.len());
             let registry = resolver.registry().clone();
             let storer = storer.clone();
             let client = self.client.clone();
@@ -255,7 +261,9 @@ impl<S: VersionStorer> Backend<S> {
             let matcher = resolver.matcher().clone();
 
             tokio::spawn(async move {
+                debug!("Background task started for fetching packages");
                 let fetched = fetch_missing_packages(&*storer, &*registry, &packages).await;
+                debug!("fetch_missing_packages returned {} packages", fetched.len());
 
                 if !fetched.is_empty() {
                     client

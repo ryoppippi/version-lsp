@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use futures::future::join_all;
 use tokio::time::sleep;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::config::FETCH_STAGGER_DELAY_MS;
 use crate::parser::types::{PackageInfo, RegistryType};
@@ -155,12 +155,14 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
 
     // Get all package names for batch query
     let package_names: Vec<_> = packages.iter().map(|p| p.name.clone()).collect();
+    debug!("Checking cache for packages: {:?}", package_names);
 
     // Filter to packages not in cache using batch WHERE IN query
     let not_in_cache = storer
         .filter_packages_not_in_cache(registry_type, &package_names)
         .inspect_err(|e| error!("Failed to filter packages not in cache: {}", e))
         .unwrap_or_default();
+    debug!("Packages not in cache: {:?}", not_in_cache);
 
     // Create a HashSet for efficient lookup
     let not_in_cache_set: std::collections::HashSet<_> = not_in_cache.into_iter().collect();
@@ -172,6 +174,7 @@ pub async fn fetch_missing_packages<S: VersionStorer>(
         .collect();
 
     if packages_to_fetch.is_empty() {
+        debug!("All packages are already in cache");
         return Vec::new();
     }
 
