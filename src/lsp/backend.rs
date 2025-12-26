@@ -7,19 +7,29 @@ use tower_lsp::{Client, LanguageServer};
 use tracing::{debug, error, info, warn};
 
 use crate::config::{LspConfig, data_dir, db_path};
+use crate::lsp::code_action::{
+    PackageIndex, generate_bump_code_actions, generate_bump_code_actions_with_sha,
+};
 use crate::lsp::diagnostics::generate_diagnostics;
 use crate::lsp::refresh::{fetch_missing_packages, refresh_packages};
 use crate::lsp::resolver::{PackageResolver, create_default_resolvers};
-use crate::parser::types::{RegistryType, detect_parser_type};
+use crate::parser::types::{PackageInfo, RegistryType, detect_parser_type};
 use crate::version::cache::Cache;
 use crate::version::checker::VersionStorer;
+use crate::version::registries::github::GitHubRegistry;
 use crate::version::registry::Registry;
+
+/// Cached parsed packages for a document
+struct DocumentCache {
+    packages: Vec<PackageInfo>,
+}
 
 pub struct Backend<S: VersionStorer> {
     client: Client,
     storer: Option<Arc<S>>,
     config: Arc<RwLock<LspConfig>>,
     resolvers: HashMap<RegistryType, PackageResolver>,
+    documents: Arc<RwLock<HashMap<Url, DocumentCache>>>,
 }
 
 impl Backend<Cache> {
@@ -32,6 +42,7 @@ impl Backend<Cache> {
             storer,
             config: Arc::new(RwLock::new(config)),
             resolvers,
+            documents: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -70,7 +81,26 @@ impl<S: VersionStorer> Backend<S> {
             storer: Some(storer),
             config: Arc::new(RwLock::new(LspConfig::default())),
             resolvers,
+            documents: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Parse document and cache packages
+    fn cache_document(&self, uri: &Url, content: &str) {
+        let uri_str = uri.as_str();
+        let packages = detect_parser_type(uri_str)
+            .and_then(|registry_type| self.resolvers.get(&registry_type))
+            .map(|resolver| {
+                resolver
+                    .parser()
+                    .parse(content)
+                    .inspect_err(|e| warn!("Failed to parse {}: {}", uri_str, e))
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+
+        let mut docs = self.documents.write().expect("documents lock poisoned");
+        docs.insert(uri.clone(), DocumentCache { packages });
     }
 
     /// Check if a registry is enabled in the configuration
@@ -136,6 +166,7 @@ impl<S: VersionStorer> Backend<S> {
                     ..Default::default()
                 },
             )),
+            code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
             ..Default::default()
         }
     }
@@ -253,7 +284,10 @@ impl<S: VersionStorer> Backend<S> {
 
         // Spawn background task to fetch missing packages
         if !packages.is_empty() {
-            debug!("Spawning background task to fetch {} packages", packages.len());
+            debug!(
+                "Spawning background task to fetch {} packages",
+                packages.len()
+            );
             let registry = resolver.registry().clone();
             let storer = storer.clone();
             let client = self.client.clone();
@@ -326,6 +360,9 @@ impl<S: VersionStorer> LanguageServer for Backend<S> {
             )
             .await;
 
+        // Parse and cache packages
+        self.cache_document(&params.text_document.uri, &params.text_document.text);
+
         self.check_and_publish_diagnostics(params.text_document.uri, params.text_document.text)
             .await;
     }
@@ -343,7 +380,97 @@ impl<S: VersionStorer> LanguageServer for Backend<S> {
             )
             .await;
 
+        // Re-parse and cache packages
+        self.cache_document(&params.text_document.uri, &content);
+
         self.check_and_publish_diagnostics(params.text_document.uri, content)
             .await;
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.client
+            .log_message(
+                MessageType::LOG,
+                format!("Document closed: {}", params.text_document.uri),
+            )
+            .await;
+
+        // Remove document from cache
+        {
+            let mut docs = self.documents.write().expect("documents lock poisoned");
+            docs.remove(&params.text_document.uri);
+        }
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = &params.text_document.uri;
+        let uri_str = uri.as_str();
+        debug!("Code action requested for URI: {}", uri_str);
+
+        let Some(registry_type) = detect_parser_type(uri_str) else {
+            debug!("No parser type detected for URI: {}", uri_str);
+            return Ok(None);
+        };
+
+        if !self.is_registry_enabled(registry_type) {
+            debug!(
+                "Registry {:?} is disabled, skipping code actions",
+                registry_type
+            );
+            return Ok(None);
+        }
+
+        let Some(storer) = &self.storer else {
+            debug!("Storer not available");
+            return Ok(None);
+        };
+
+        // Get cached packages
+        let packages = {
+            let docs = self.documents.read().expect("documents lock poisoned");
+            let Some(cache) = docs.get(uri) else {
+                debug!("Document not found in cache: {}", uri_str);
+                return Ok(None);
+            };
+            cache.packages.clone()
+        };
+
+        if packages.is_empty() {
+            return Ok(None);
+        }
+
+        let index = PackageIndex::new(&packages);
+        let position = params.range.start;
+
+        let Some(package) = index.find_at_position(position) else {
+            debug!("No package found at position {:?}", position);
+            return Ok(None);
+        };
+
+        debug!(
+            "Found package at cursor: {} {}",
+            package.name, package.version
+        );
+
+        // For GitHub Actions with commit hash, use async function to fetch SHA
+        let actions = if package.registry_type == RegistryType::GitHubActions
+            && package.commit_hash.is_some()
+        {
+            let sha_fetcher = GitHubRegistry::default();
+            generate_bump_code_actions_with_sha(&**storer, package, uri, &sha_fetcher).await
+        } else {
+            generate_bump_code_actions(&**storer, package, uri)
+        };
+
+        if actions.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(
+            actions
+                .into_iter()
+                .map(CodeActionOrCommand::CodeAction)
+                .collect(),
+        ))
     }
 }
