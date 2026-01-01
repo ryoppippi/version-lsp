@@ -5,6 +5,7 @@ mod helper;
 use std::collections::HashMap;
 
 use mockito::Server;
+use serial_test::serial;
 use tower::Service;
 use tower_lsp::LspService;
 use tower_lsp::lsp_types::*;
@@ -399,6 +400,7 @@ jobs:
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn code_action_returns_bump_actions_for_hash_with_comment() {
     // Pattern 2: Hash + comment → Returns version bump code actions with SHA replacement
     let mut server = Server::new_async().await;
@@ -532,6 +534,7 @@ jobs:
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn code_action_returns_bump_actions_for_hash_only() {
     // Pattern 1: Hash only → Returns version bump code action with SHA replacement
     let mut server = Server::new_async().await;
