@@ -28,26 +28,42 @@
             inherit system;
             overlays = [ rust-overlay.overlays.default ];
           };
+
+          rustToolchainToml = pkgs.lib.importTOML ./rust-toolchain.toml;
+          rustVersion = rustToolchainToml.toolchain.channel;
+
+          # Full toolchain from rust-toolchain.toml (for dev)
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-          src = craneLib.cleanCargoSource ./.;
+
+          # Minimal toolchain (for CI build)
+          rustToolchainMinimal = pkgs.rust-bin.stable.${rustVersion}.minimal;
+          craneLibMinimal = (crane.mkLib pkgs).overrideToolchain rustToolchainMinimal;
 
           commonArgs = {
-            inherit src;
+            src = (crane.mkLib pkgs).cleanCargoSource ./.;
           };
 
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+          cargoArtifactsMinimal = craneLibMinimal.buildDepsOnly commonArgs;
+
+          meta = {
+            description = "LSP for package version management";
+            homepage = "https://github.com/skanehira/version-lsp";
+            license = pkgs.lib.licenses.mit;
+          };
         in
         {
-          packages.default = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
+          packages = {
+            default = craneLib.buildPackage (commonArgs // {
+              inherit cargoArtifacts meta;
+            });
 
-            meta = {
-              description = "LSP for package version management";
-              homepage = "https://github.com/skanehira/version-lsp";
-              license = pkgs.lib.licenses.mit;
-            };
-          });
+            minimal = craneLibMinimal.buildPackage (commonArgs // {
+              cargoArtifacts = cargoArtifactsMinimal;
+              inherit meta;
+            });
+          };
 
           devShells.default = craneLib.devShell {
             packages = [

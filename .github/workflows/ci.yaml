@@ -116,4 +116,4 @@ jobs:
           github_access_token: ${{ github.token }}
 
       - name: Build with Nix
-        run: nix build --print-build-logs
+        run: nix build .#minimal --print-build-logs
