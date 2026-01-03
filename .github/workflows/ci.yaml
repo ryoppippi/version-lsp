@@ -122,3 +122,6 @@ jobs:
 
       - name: Build with Nix
         run: nix build .#ci --print-build-logs
+
+      - name: Verify build
+        run: ./result/bin/version-lsp --version
