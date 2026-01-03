@@ -66,6 +66,21 @@ Download the latest binary from [GitHub Releases](https://github.com/skanehira/v
 cargo install --git https://github.com/skanehira/version-lsp
 ```
 
+### Using Nix Flake
+
+If you have Nix with flakes enabled:
+
+```bash
+# Enter development shell with Rust toolchain
+nix develop
+
+# Build the package
+nix build
+
+# Run directly from flake
+nix run github:skanehira/version-lsp
+```
+
 ## Editor Setup
 
 ### Neovim (nvim-lspconfig)
