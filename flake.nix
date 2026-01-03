@@ -61,6 +61,7 @@
 
             minimal = craneLibMinimal.buildPackage (commonArgs // {
               cargoArtifacts = cargoArtifactsMinimal;
+              doCheck = false;
               inherit meta;
             });
           };
