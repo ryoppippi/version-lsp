@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -507,7 +507,7 @@ impl VersionStorer for Cache {
                 .chain(package_names.iter().map(|s| s as &dyn rusqlite::ToSql))
                 .collect();
 
-        let cached_packages: std::collections::HashSet<String> = stmt
+        let cached_packages: HashSet<String> = stmt
             .query_map(params.as_slice(), |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
