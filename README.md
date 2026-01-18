@@ -35,6 +35,7 @@ A Language Server Protocol (LSP) implementation that provides version checking d
 | `Cargo.toml`                                          | crates.io       |
 | `go.mod`                                              | Go Proxy        |
 | `.github/workflows/*.yaml`/`.github/actions/*/*.yaml` | GitHub Releases |
+| `deno.json` / `deno.jsonc`                            | JSR             |
 
 ### pnpm Catalogs
 
@@ -83,6 +84,25 @@ nix run github:skanehira/version-lsp
 
 ## Editor Setup
 
+### Neovim (vim.lsp)
+
+Available in Neovim >= 0.11
+
+```lua
+vim.lsp.config('version_lsp', {
+  cmd = { 'version-lsp' },
+  filetypes = { 'json', 'jsonc', 'toml', 'gomod', 'yaml' },
+  root_markers = { '.git' },
+  settings = {
+    ["version-lsp"] = {
+      -- See 'Configuration Options' section below for details
+    },
+  },
+})
+
+vim.lsp.enable('version_lsp')
+```
+
 ### Neovim (nvim-lspconfig)
 
 ```lua
@@ -93,7 +113,7 @@ if not configs.version_lsp then
   configs.version_lsp = {
     default_config = {
       cmd = { 'version-lsp' },
-      filetypes = { 'json', 'toml', 'gomod', 'yaml' },
+      filetypes = { 'json', 'jsonc', 'toml', 'gomod', 'yaml' },
       root_dir = function(fname)
         return lspconfig.util.find_git_ancestor(fname)
       end,
@@ -114,6 +134,7 @@ lspconfig.version_lsp.setup({
         goProxy = { enabled = true },
         github = { enabled = true },
         pnpmCatalog = { enabled = true },
+        jsr = { enabled = true },
       },
       ignorePrerelease = true,  -- Ignore prerelease versions (default: true)
     },
@@ -131,6 +152,7 @@ lspconfig.version_lsp.setup({
 | `registries.goProxy.enabled`     | boolean | `true`     | Enable Go Proxy registry checks                            |
 | `registries.github.enabled`      | boolean | `true`     | Enable GitHub Releases checks                              |
 | `registries.pnpmCatalog.enabled` | boolean | `true`     | Enable pnpm catalog checks                                 |
+| `registries.jsr.enabled`         | boolean | `true`     | Enable JSR registry checks                                 |
 | `ignorePrerelease`               | boolean | `true`     | Ignore prerelease versions (alpha, beta, rc, etc.)         |
 
 ## Data Storage
