@@ -34,6 +34,7 @@ A Language Server Protocol (LSP) implementation that provides version checking d
 | `pnpm-workspace.yaml`                                 | npm             |
 | `Cargo.toml`                                          | crates.io       |
 | `go.mod`                                              | Go Proxy        |
+| `pyproject.toml`                                      | PyPI            |
 | `.github/workflows/*.yaml`/`.github/actions/*/*.yaml` | GitHub Releases |
 | `deno.json` / `deno.jsonc`                            | JSR             |
 
@@ -132,6 +133,7 @@ lspconfig.version_lsp.setup({
         npm = { enabled = true },
         crates = { enabled = true },
         goProxy = { enabled = true },
+        pypi = { enabled = true },
         github = { enabled = true },
         pnpmCatalog = { enabled = true },
         jsr = { enabled = true },
@@ -150,6 +152,7 @@ lspconfig.version_lsp.setup({
 | `registries.npm.enabled`         | boolean | `true`     | Enable npm registry checks                                 |
 | `registries.crates.enabled`      | boolean | `true`     | Enable crates.io registry checks                           |
 | `registries.goProxy.enabled`     | boolean | `true`     | Enable Go Proxy registry checks                            |
+| `registries.pypi.enabled`        | boolean | `true`     | Enable PyPI registry checks                                |
 | `registries.github.enabled`      | boolean | `true`     | Enable GitHub Releases checks                              |
 | `registries.pnpmCatalog.enabled` | boolean | `true`     | Enable pnpm catalog checks                                 |
 | `registries.jsr.enabled`         | boolean | `true`     | Enable JSR registry checks                                 |
