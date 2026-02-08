@@ -49,8 +49,12 @@ impl Parser for PackageJsonParser {
 
 impl PackageJsonParser {
     /// Dependency field names to extract
-    const DEPENDENCY_FIELDS: [&'static str; 4] =
-        ["dependencies", "devDependencies", "peerDependencies", "overrides"];
+    const DEPENDENCY_FIELDS: [&'static str; 4] = [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "overrides",
+    ];
 
     /// Parse npm alias format: npm:package@version or npm:@scope/package@version
     /// Returns (actual_package_name, version)
