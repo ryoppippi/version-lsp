@@ -23,9 +23,18 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Approve & enable auto-merge for Dependabot PR
+        # Skip auto-merge for github_actions updates: those PRs modify files
+        # under .github/workflows/, and merging such changes requires the
+        # `workflows` scope that the default GITHUB_TOKEN cannot be granted.
+        # Without this guard the job fails with:
+        #   "refusing to allow a GitHub App to create or update workflow ...
+        #    without `workflows` permission (mergePullRequest)".
+        # GitHub Actions updates must therefore be merged manually (or via a
+        # PAT / GitHub App that holds the `workflow` scope).
         if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          steps.metadata.outputs.package-ecosystem != 'github_actions' &&
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor')
         run: |
           gh pr merge --auto -s "$PR_URL"
         env:
