@@ -2,11 +2,8 @@
 
 use crate::parser::types::{ExtraInfo, PackageInfo};
 use crate::version::checker::VersionStorer;
+use crate::version::matcher::VersionMatcher;
 use crate::version::registries::github::TagShaFetcher;
-use crate::version::semver::{
-    calculate_latest_major, calculate_latest_minor, calculate_latest_patch, calculate_next_major,
-    calculate_next_minor,
-};
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, Position, Range, TextEdit, Url, WorkspaceEdit,
@@ -16,26 +13,32 @@ use super::{create_bump_action, extract_version_prefix};
 
 /// Compute deduplicated bump targets from smallest to largest jump.
 ///
-/// Returns `(bare_version, label)` pairs with duplicates removed.
-fn compute_bump_targets<'a>(current: &str, versions: &[String]) -> Vec<(String, &'a str)> {
-    let patch = calculate_latest_patch(current, versions);
-    let next_minor = calculate_next_minor(current, versions);
-    let minor = calculate_latest_minor(current, versions);
-    let next_major = calculate_next_major(current, versions);
-    let major = calculate_latest_major(current, versions);
+/// Returns `(bare_version, label)` pairs with duplicates removed. Bump target
+/// calculation is delegated to the registry-specific matcher so suffix-aware
+/// formats (e.g. Docker tags) can override the default semver behavior.
+fn compute_bump_targets<'a>(
+    current: &str,
+    versions: &[String],
+    matcher: &dyn VersionMatcher,
+) -> Vec<(String, &'a str)> {
+    let targets = matcher.calculate_bump_targets(current, versions);
 
     // Only include "next" targets when they differ from "latest" — otherwise
     // the "next" label would win the dedup race and hide the "latest" label.
-    let effective_next_minor = next_minor.filter(|nm| minor.as_ref() != Some(nm));
-    let effective_next_major = next_major.filter(|nm| major.as_ref() != Some(nm));
+    let effective_next_minor = targets
+        .next_minor
+        .filter(|nm| targets.minor.as_ref() != Some(nm));
+    let effective_next_major = targets
+        .next_major
+        .filter(|nm| targets.major.as_ref() != Some(nm));
 
     let mut seen = std::collections::HashSet::new();
     let candidates = [
-        (patch, "latest patch"),
+        (targets.patch, "latest patch"),
         (effective_next_minor, "next minor"),
-        (minor, "latest minor"),
+        (targets.minor, "latest minor"),
         (effective_next_major, "next major"),
-        (major, "latest major"),
+        (targets.major, "latest major"),
     ];
 
     candidates
@@ -60,6 +63,7 @@ pub fn generate_upgrade_code_actions<S: VersionStorer>(
     storer: &S,
     package: &PackageInfo,
     uri: &Url,
+    matcher: &dyn VersionMatcher,
 ) -> Vec<CodeAction> {
     let Ok(versions) = storer.get_versions(package.registry_type, &package.name) else {
         return vec![];
@@ -72,7 +76,7 @@ pub fn generate_upgrade_code_actions<S: VersionStorer>(
     let current = &package.version;
     let prefix = extract_version_prefix(current);
 
-    compute_bump_targets(current, &versions)
+    compute_bump_targets(current, &versions, matcher)
         .into_iter()
         .map(|(v, label)| {
             let new_version = format!("{prefix}{v}");
@@ -96,6 +100,7 @@ pub async fn generate_upgrade_code_actions_with_sha<S: VersionStorer, F: TagShaF
     package: &PackageInfo,
     uri: &Url,
     sha_fetcher: &F,
+    matcher: &dyn VersionMatcher,
 ) -> Vec<CodeAction> {
     let Ok(versions) = storer.get_versions(package.registry_type, &package.name) else {
         return vec![];
@@ -119,7 +124,7 @@ pub async fn generate_upgrade_code_actions_with_sha<S: VersionStorer, F: TagShaF
 
     let mut actions = Vec::new();
 
-    for (v, label) in compute_bump_targets(current, &versions) {
+    for (v, label) in compute_bump_targets(current, &versions, matcher) {
         let new_version = format!("{prefix}{v}");
 
         // If package has a commit hash, we need to fetch the SHA for the new version
@@ -245,6 +250,7 @@ mod tests {
     use crate::parser::types::RegistryType;
     use crate::version::cache::PackageId;
     use crate::version::error::{CacheError, RegistryError};
+    use crate::version::matchers::{GitHubActionsMatcher, NpmVersionMatcher};
     use rstest::rstest;
 
     fn make_package(name: &str, version: &str, line: u32, column: u32, len: usize) -> PackageInfo {
@@ -370,7 +376,7 @@ mod tests {
         let package = make_package("lodash", "4.17.19", 3, 15, 7);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert_eq!(actions.len(), 3);
         assert_eq!(actions[0].title, "Upgrade to latest patch: 4.17.21");
@@ -384,7 +390,7 @@ mod tests {
         let package = make_package("lodash", "4.17.19", 3, 15, 7);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert!(actions.is_empty());
     }
@@ -395,7 +401,7 @@ mod tests {
         let package = make_package("lodash", "5.0.0", 3, 15, 5);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert!(actions.is_empty());
     }
@@ -406,7 +412,7 @@ mod tests {
         let package = make_package("lodash", "4.17.19", 3, 15, 7);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert_eq!(actions.len(), 1);
         let edit = actions[0].edit.as_ref().unwrap();
@@ -435,7 +441,7 @@ mod tests {
         let package = make_package("lodash", "^4.17.19", 3, 15, 8);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert_eq!(actions.len(), 3);
         assert_eq!(actions[0].title, "Upgrade to latest patch: ^4.17.21");
@@ -455,7 +461,7 @@ mod tests {
         let package = make_package("lodash", "~4.17.19", 3, 15, 8);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].title, "Upgrade to latest patch: ~4.17.21");
@@ -467,7 +473,7 @@ mod tests {
         let package = make_package("lodash", ">=4.17.19", 3, 15, 9);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].title, "Upgrade to latest major: >=5.0.0");
@@ -479,7 +485,7 @@ mod tests {
         let package = make_package("golang.org/x/text", "v0.14.0", 3, 15, 7);
         let uri = Url::parse("file:///test/go.mod").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0].title, "Upgrade to latest minor: v0.15.0");
@@ -492,7 +498,7 @@ mod tests {
         let package = make_package("lodash", "^2.0.0", 3, 15, 6);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0].title, "Upgrade to next major: ^3.5.0");
@@ -505,7 +511,7 @@ mod tests {
         let package = make_package("lodash", "^4.17.0", 3, 15, 7);
         let uri = Url::parse("file:///test/package.json").unwrap();
 
-        let actions = generate_upgrade_code_actions(&storer, &package, &uri);
+        let actions = generate_upgrade_code_actions(&storer, &package, &uri, &NpmVersionMatcher);
 
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0].title, "Upgrade to next minor: ^4.18.5");
@@ -616,8 +622,14 @@ mod tests {
         );
         let uri = Url::parse("file:///test/.github/workflows/ci.yml").unwrap();
 
-        let actions =
-            generate_upgrade_code_actions_with_sha(&storer, &package, &uri, &sha_fetcher).await;
+        let actions = generate_upgrade_code_actions_with_sha(
+            &storer,
+            &package,
+            &uri,
+            &sha_fetcher,
+            &GitHubActionsMatcher,
+        )
+        .await;
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].title, "Upgrade to latest: v4.1.6");
@@ -652,8 +664,14 @@ mod tests {
         );
         let uri = Url::parse("file:///test/.github/workflows/ci.yml").unwrap();
 
-        let actions =
-            generate_upgrade_code_actions_with_sha(&storer, &package, &uri, &sha_fetcher).await;
+        let actions = generate_upgrade_code_actions_with_sha(
+            &storer,
+            &package,
+            &uri,
+            &sha_fetcher,
+            &GitHubActionsMatcher,
+        )
+        .await;
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].title, "Upgrade to latest patch: v4.1.6");
@@ -685,8 +703,14 @@ mod tests {
         );
         let uri = Url::parse("file:///test/.github/workflows/ci.yml").unwrap();
 
-        let actions =
-            generate_upgrade_code_actions_with_sha(&storer, &package, &uri, &sha_fetcher).await;
+        let actions = generate_upgrade_code_actions_with_sha(
+            &storer,
+            &package,
+            &uri,
+            &sha_fetcher,
+            &GitHubActionsMatcher,
+        )
+        .await;
 
         assert!(actions.is_empty());
     }
@@ -698,8 +722,14 @@ mod tests {
         let package = make_package("actions/checkout", "v3.0.0", 4, 31, 6);
         let uri = Url::parse("file:///test/.github/workflows/ci.yml").unwrap();
 
-        let actions =
-            generate_upgrade_code_actions_with_sha(&storer, &package, &uri, &sha_fetcher).await;
+        let actions = generate_upgrade_code_actions_with_sha(
+            &storer,
+            &package,
+            &uri,
+            &sha_fetcher,
+            &GitHubActionsMatcher,
+        )
+        .await;
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].title, "Upgrade to latest major: v4.0.0");

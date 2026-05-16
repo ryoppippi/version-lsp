@@ -119,6 +119,7 @@ impl<S: VersionStorer> Backend<S> {
             RegistryType::PnpmCatalog => config.registries.pnpm_catalog.enabled,
             RegistryType::Jsr => config.registries.jsr.enabled,
             RegistryType::PyPI => config.registries.pypi.enabled,
+            RegistryType::Docker => config.registries.docker.enabled,
         }
     }
 
@@ -458,14 +459,26 @@ impl<S: VersionStorer> LanguageServer for Backend<S> {
             package.name, package.version
         );
 
+        let Some(resolver) = self.resolvers.get(&registry_type) else {
+            debug!("No resolver for registry type {:?}", registry_type);
+            return Ok(None);
+        };
+
         // For GitHub Actions with commit hash, use async function to fetch SHA
         let mut actions = if package.registry_type == RegistryType::GitHubActions
             && package.commit_hash.is_some()
         {
             let sha_fetcher = GitHubRegistry::default();
-            generate_upgrade_code_actions_with_sha(&**storer, package, uri, &sha_fetcher).await
+            generate_upgrade_code_actions_with_sha(
+                &**storer,
+                package,
+                uri,
+                &sha_fetcher,
+                &**resolver.matcher(),
+            )
+            .await
         } else {
-            generate_upgrade_code_actions(&**storer, package, uri)
+            generate_upgrade_code_actions(&**storer, package, uri, &**resolver.matcher())
         };
 
         // Append constraint actions based on registry type
