@@ -53,14 +53,28 @@
         in
         {
           packages = {
+            # 成果物ビルド。テストは `nix flake check` (checks.test) で実行するため
+            # ここでは doCheck = false とし、ビルドを hermetic かつ高速に保つ。
             default = craneLibMinimal.buildPackage (commonArgs // {
               inherit cargoArtifacts meta;
+              doCheck = false;
             });
 
             # CI build (skip tests)
             ci = craneLibMinimal.buildPackage (commonArgs // {
               inherit cargoArtifacts meta;
               doCheck = false;
+            });
+          };
+
+          # `nix flake check` でテストを実行する。
+          # reqwest (rustls) がクライアント生成時にシステムの CA 証明書を要求するため
+          # SSL_CERT_FILE を渡す。テスト自体は mockito (ローカルモック) ベースで
+          # 外部ネットワークには出ないため、これで sandbox 内でも完結する。
+          checks = {
+            test = craneLibMinimal.cargoTest (commonArgs // {
+              inherit cargoArtifacts;
+              SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
             });
           };
 
